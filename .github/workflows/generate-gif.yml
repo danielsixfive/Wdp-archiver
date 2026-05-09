@@ -1,0 +1,35 @@
+name: Generate Timelapse GIF
+
+on:
+  workflow_dispatch:   # you trigger it manually from the Actions tab
+
+jobs:
+  gif:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout assets branch
+        uses: actions/checkout@v4
+        with:
+          ref: assets
+
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - name: Create resized GIF from all snapshots
+        run: |
+          convert -delay 20 -loop 0 -resize 10% snapshot_*.png timelapse.gif
+          echo "GIF created: $(ls -lh timelapse.gif)"
+
+      - name: Commit timelapse.gif to assets branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timelapse.gif
+          if ! git diff --cached --quiet; then
+            git commit -m "Update timelapse GIF"
+            git push origin assets
+          else
+            echo "No change in GIF (maybe no new snapshots?)"
+          fi
