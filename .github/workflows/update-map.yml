@@ -46,12 +46,12 @@ jobs:
 
       - name: Update snapshot list JSON
         run: |
-          python3 -c "
+          python3 << 'EOF'
           import glob, json
           files = sorted(glob.glob('wdpsnapshot_*.png'))
-          with open('snapshots.json','w') as f:
-          json.dump(files, f)
-          "
+          with open('snapshots.json', 'w') as f:
+              json.dump(files, f)
+          EOF
 
       - name: Commit updated GIFs and snapshot list (always)
         run: |
