@@ -81,7 +81,6 @@
     <input type="range" id="slider" min="0" max="0" value="0" step="1">
     <span id="timestamp-label"></span>
   </div>
-
 <script>
   (function() {
     const canvas = document.getElementById('canvas');
@@ -90,17 +89,15 @@
     const label = document.getElementById('timestamp-label');
     const info = document.getElementById('info');
 
-    // ---------- High‑DPI sharpness ----------
     const dpr = window.devicePixelRatio || 1;
     ctx.imageSmoothingEnabled = false;
 
-    // ---------- State ----------
     let snapshots = [];
     let currentImage = new Image();
     let currentIndex = -1;
-    let requestedIndex = -1;      // index we actually want to display
+    let requestedIndex = -1;
 
-    // View transform – in CSS pixels (the drawing code will apply dpr)
+    // View transform – in CSS pixels
     let offsetX = 0, offsetY = 0;
     let scale = 1.0;
     const MIN_SCALE = 0.1;
@@ -111,24 +108,26 @@
     let dragStartX = 0, dragStartY = 0;
     let dragOffsetX = 0, dragOffsetY = 0;
 
-    // Pinch zoom state
+    // Pinch zoom
     let initialPinchDistance = 0;
     let initialScale = 1.0;
     let initialPinchCenter = { x: 0, y: 0 };
 
-    // ---------- Resize (high‑DPI canvas) ----------
+    // Offscreen canvas for crisp pixel source
+    let offscreen = null;
+    let offscreenCtx = null;
+
+    // ---- Resize (high‑DPI) ----
     function resize() {
-      // Physical pixel size
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
-      // CSS display size
       canvas.style.width = window.innerWidth + 'px';
       canvas.style.height = window.innerHeight + 'px';
       drawImage();
     }
     window.addEventListener('resize', resize);
 
-    // ---------- Load snapshot list ----------
+    // ---- Load snapshot list ----
     fetch('snapshots.json')
       .then(r => r.json())
       .then(files => {
@@ -147,14 +146,13 @@
         console.error(e);
       });
 
-    // ---------- Image loading ----------
+    // ---- Image loading ----
     function loadSnapshot(index) {
       if (index < 0 || index >= snapshots.length) return;
       if (index === currentIndex) return;
 
       requestedIndex = index;
 
-      // Update UI immediately
       slider.value = index;
       const filename = snapshots[index];
       const match = filename.match(/(\d{8})_(\d{6})/);
@@ -166,18 +164,20 @@
         label.textContent = filename;
       }
 
-      // Start loading – old image remains on canvas
       currentImage.src = snapshots[index];
     }
 
     currentImage.onload = () => {
       if (currentIndex !== requestedIndex) {
+        // First load
         if (currentIndex === -1) {
           currentIndex = requestedIndex;
-          resetView();   // first load: fit to screen
+          createOffscreen();
+          resetView();
         } else {
           currentIndex = requestedIndex;
-          drawImage();   // preserve existing pan & zoom
+          createOffscreen();
+          drawImage();
         }
       }
     };
@@ -186,12 +186,24 @@
       console.error('Failed to load image:', currentImage.src);
     };
 
-    // ---------- Drawing (with high‑DPI transform) ----------
-    function resetView() {
+    // Create an offscreen canvas at the image’s native resolution
+    function createOffscreen() {
       if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-      const imgW = currentImage.width;
-      const imgH = currentImage.height;
-      // Use CSS dimensions for fitting (the physical canvas size is larger)
+      const w = currentImage.width;
+      const h = currentImage.height;
+      offscreen = document.createElement('canvas');
+      offscreen.width = w;
+      offscreen.height = h;
+      offscreenCtx = offscreen.getContext('2d');
+      offscreenCtx.imageSmoothingEnabled = false;
+      offscreenCtx.drawImage(currentImage, 0, 0);
+    }
+
+    // ---- Drawing ----
+    function resetView() {
+      if (!offscreen) return;
+      const imgW = offscreen.width;
+      const imgH = offscreen.height;
       const winW = window.innerWidth;
       const winH = window.innerHeight;
       scale = Math.min(winW / imgW, winH / imgH);
@@ -201,23 +213,21 @@
     }
 
     function drawImage() {
-      // Clear the whole physical canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!offscreen) return;
 
-      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-
-      // Start with the device‑pixel ratio scale so that CSS‑pixel coordinates
-      // line up exactly with physical pixels
+      // Map CSS pixels to physical pixels perfectly
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      // Apply pan & zoom (in CSS pixels)
+      // Apply pan & zoom
       ctx.translate(offsetX, offsetY);
       ctx.scale(scale, scale);
-      ctx.drawImage(currentImage, 0, 0);
-      // Reset transform for subsequent calls (important for clearRect, etc.)
+      // Draw the offscreen canvas (crisp, no smoothing)
+      ctx.drawImage(offscreen, 0, 0);
+      // Reset transform for next frame
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
-    // ---------- Mouse events ----------
+    // ---- Mouse events ----
     canvas.addEventListener('mousedown', (e) => {
       e.preventDefault();
       dragging = true;
@@ -242,7 +252,7 @@
       canvas.style.cursor = 'grab';
     });
 
-    // ---------- Touch events ----------
+    // ---- Touch events ----
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const touches = e.touches;
@@ -298,7 +308,7 @@
       initialPinchDistance = 0;
     });
 
-    // ---------- Mouse wheel zoom ----------
+    // ---- Wheel zoom ----
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const zoomFactor = 1.1;
@@ -317,13 +327,13 @@
       drawImage();
     }, { passive: false });
 
-    // ---------- Slider ----------
+    // ---- Slider ----
     slider.addEventListener('input', () => {
       const idx = parseInt(slider.value, 10);
       loadSnapshot(idx);
     });
 
-    // ---------- Keyboard ----------
+    // ---- Keyboard ----
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -336,7 +346,6 @@
       }
     });
 
-    // Initial resize
     resize();
   })();
 </script>
