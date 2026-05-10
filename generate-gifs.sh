@@ -94,7 +94,7 @@ while read -r name x y w h outfile; do
       "$BANNER"
 
     # Step 3: Stack banner on top of cropped image
-    convert "$CROPPED" "$BANNER" -append +repage "$outframe"
+    convert "$BANNER" "$CROPPED" -append +repage "$outframe"
 
     # Clean up temp files
     rm "$CROPPED" "$BANNER"
