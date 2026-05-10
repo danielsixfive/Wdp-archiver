@@ -8,8 +8,8 @@ if [ ! -f "$CROPS_FILE" ]; then
   exit 1
 fi
 
-# Count snapshots available
-SNAPSHOTS=(wdpsnapshot_*.png)
+# Collect snapshots (matches any .png with "snapshot" in the name)
+SNAPSHOTS=( *snapshot*.png )
 if [ ${#SNAPSHOTS[@]} -eq 0 ]; then
   echo "No snapshot files found."
   exit 1
@@ -17,8 +17,8 @@ fi
 
 echo "Found ${#SNAPSHOTS[@]} snapshots."
 
-# Read each crop line from the config file
-while IFS=$'\t' read -r name x y w h outfile; do
+# Read each line, split by any whitespace (space or tab)
+while read -r name x y w h outfile; do
   # Skip blank or comment lines
   [[ -z "$name" || "$name" == \#* ]] && continue
 
@@ -35,7 +35,7 @@ while IFS=$'\t' read -r name x y w h outfile; do
     convert "$snap" -crop "${w}x${h}+${x}+${y}" +repage "$outframe"
   done
 
-  # Generate GIF from cropped frames (alphabetically, which is timestamp order)
+  # Generate GIF from cropped frames (sorted alphabetically = timestamp order)
   convert -delay 20 -loop 0 "${tmpdir}"/*.png "$outfile"
   echo "  GIF saved: $outfile"
 
