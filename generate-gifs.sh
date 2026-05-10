@@ -55,7 +55,7 @@ fi
 echo "Using ${#SNAPSHOTS[@]} snapshots."
 
 # Normal delay between frames (1/100 sec)
-NORMAL_DELAY=20
+NORMAL_DELAY=10
 # Extra delay for the last frame (larger -> longer pause)
 END_DELAY=100
 
