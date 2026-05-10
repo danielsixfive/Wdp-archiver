@@ -77,8 +77,8 @@ while read -r name x y w h outfile; do
      outframe="${tmpdir}/frame_$(printf "%04d" $i).png"
     echo "  cropping & annotating $snap (${x},${y} ${w}x${h}) – $ts_fmt"
 
-    # Banner dimensions: height = font size * 2 + 10px padding
-    BANNER_HEIGHT=$((FONT_SIZE * 2 + 10))
+    # Banner dimensions: height = font size * 1.2 padding
+    BANNER_HEIGHT=$((FONT_SIZE * 1.2))
 
     # Step 1: Crop the snapshot to the region of interest
     CROPPED="${tmpdir}/temp_cropped_${i}.png"
