@@ -17,8 +17,8 @@ jobs:
       - name: Install ImageMagick
         run: sudo apt-get update && sudo apt-get install -y imagemagick
 
-      - name: Run cropped GIF generation
-        run: bash generate-cropped-gifs.sh
+      - name: Run GIF generation
+        run: bash generate-gifs.sh
 
       - name: Commit updated GIFs to assets
         run: |
@@ -26,7 +26,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add *.gif
           if ! git diff --cached --quiet; then
-            git commit -m "Update cropped GIFs (${GITHUB_RUN_NUMBER})"
+            git commit -m "Update GIFs (${GITHUB_RUN_NUMBER})"
             git push origin assets
           else
             echo "No changes to GIFs"
