@@ -90,20 +90,21 @@
     const label = document.getElementById('timestamp-label');
     const info = document.getElementById('info');
 
+    // Pixel‑perfect rendering
     ctx.imageSmoothingEnabled = false;
 
     let snapshots = [];
     let currentImage = new Image();
     let currentIndex = -1;
-    let requestedIndex = -1;          // the index we actually want to display
+    let requestedIndex = -1;      // the index we actually want to display
 
-    // View transform
+    // View transform (pan & zoom) – preserved across snapshot changes
     let offsetX = 0, offsetY = 0;
     let scale = 1.0;
     const MIN_SCALE = 0.1;
     const MAX_SCALE = 10.0;
 
-    // Pan state
+    // Pan state (mouse & touch)
     let dragging = false;
     let dragStartX = 0, dragStartY = 0;
     let dragOffsetX = 0, dragOffsetY = 0;
@@ -113,6 +114,7 @@
     let initialScale = 1.0;
     let initialPinchCenter = { x: 0, y: 0 };
 
+    // Resize canvas to fill window
     function resize() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -120,7 +122,7 @@
     }
     window.addEventListener('resize', resize);
 
-    // Load the list of snapshots
+    // Load snapshot list from JSON
     fetch('snapshots.json')
       .then(r => r.json())
       .then(files => {
@@ -132,6 +134,7 @@
         slider.max = files.length - 1;
         slider.value = files.length - 1;
         info.textContent = `${files.length} snapshots loaded.`;
+        // Load the latest snapshot – will trigger onload and fit screen the first time
         loadSnapshot(files.length - 1);
       })
       .catch(e => {
@@ -139,13 +142,14 @@
         console.error(e);
       });
 
+    // Load a new snapshot – does NOT reset the view
     function loadSnapshot(index) {
       if (index < 0 || index >= snapshots.length) return;
       if (index === currentIndex) return;
 
       requestedIndex = index;
 
-      // Update UI immediately (slider, timestamp)
+      // Update slider and timestamp immediately
       slider.value = index;
       const filename = snapshots[index];
       const match = filename.match(/(\d{8})_(\d{6})/);
@@ -157,27 +161,31 @@
         label.textContent = filename;
       }
 
-      // Start loading the new image – canvas keeps showing the old one
+      // Start loading the new image – canvas still shows previous frame
       currentImage.src = snapshots[index];
     }
 
-    // Called when the image file has been downloaded and decoded
+    // When the new image is fully loaded, just draw it using the existing pan/zoom
     currentImage.onload = () => {
-      // Ignore if the user has already moved on to a different snapshot
+      // Make sure we only respond to the most recent request
       if (currentIndex !== requestedIndex) {
-        currentIndex = requestedIndex;
-        // First frame ever? (canvas might be empty)
-        if (currentImage.complete && currentImage.naturalWidth > 0) {
-          resetView();   // this draws the image
+        // First load ever? (initial fit)
+        if (currentIndex === -1) {
+          currentIndex = requestedIndex;
+          resetView();   // fit image to screen only on very first load
+        } else {
+          // Subsequent snapshot: keep the exact same pan & zoom
+          currentIndex = requestedIndex;
+          drawImage();   // no resetView – preserves transform
         }
       }
     };
 
     currentImage.onerror = () => {
       console.error('Failed to load image:', currentImage.src);
-      // Keep showing whatever is on canvas (previous frame)
     };
 
+    // Only called once on the very first image load, or manually with 'R'
     function resetView() {
       if (!currentImage.complete || currentImage.naturalWidth === 0) return;
       const imgW = currentImage.width;
@@ -192,29 +200,14 @@
 
     function drawImage() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (!currentImage.complete || currentImage.naturalWidth === 0) {
-        // If no image loaded yet, keep the canvas as is (don't draw black)
-        // Instead of filling with black, we just leave the previous content.
-        // But clearRect already erased it. So we need to avoid clearing altogether.
-        // We'll handle that by not calling drawImage until we have an image.
-        return;
-      }
+      // Only draw if we have a fully loaded image
+      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
       ctx.save();
       ctx.translate(offsetX, offsetY);
       ctx.scale(scale, scale);
       ctx.drawImage(currentImage, 0, 0);
       ctx.restore();
     }
-
-    // Overwrite drawImage to do nothing if no image is loaded (so we don't clear)
-    const originalDrawImage = drawImage;
-    drawImage = function() {
-      if (!currentImage.complete || currentImage.naturalWidth === 0) {
-        // Do not clear, just keep existing canvas content
-        return;
-      }
-      originalDrawImage();
-    };
 
     // ---------- Mouse events ----------
     canvas.addEventListener('mousedown', (e) => {
@@ -241,7 +234,7 @@
       canvas.style.cursor = 'grab';
     });
 
-    // ---------- Touch events ----------
+    // ---------- Touch events (mobile) ----------
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
       const touches = e.touches;
@@ -316,13 +309,13 @@
       drawImage();
     }, { passive: false });
 
-    // Slider
+    // Slider changes snapshot
     slider.addEventListener('input', () => {
       const idx = parseInt(slider.value, 10);
       loadSnapshot(idx);
     });
 
-    // Keyboard
+    // Keyboard shortcuts
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -335,6 +328,7 @@
       }
     });
 
+    // Initial resize
     resize();
   })();
 </script>
