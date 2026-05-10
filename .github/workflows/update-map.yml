@@ -41,7 +41,7 @@ jobs:
             echo "No changes to commit"
           fi
       - name: Generate cropped GIFs (last 24h)
-        run: bash generate-cropped-gifs.sh
+        run: bash generate-gifs.sh
 
       - name: Commit updated GIFs
         run: |
