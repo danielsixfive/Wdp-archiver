@@ -1,34 +1,46 @@
-name: Generate Cropped GIFs
+#!/bin/bash
+set -euo pipefail
 
-on:
-  workflow_dispatch:   # manual trigger
+CROPS_FILE="crops.txt"
 
-jobs:
-  gifs:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout assets branch
-        uses: actions/checkout@v4
-        with:
-          ref: assets
+if [ ! -f "$CROPS_FILE" ]; then
+  echo "Error: $CROPS_FILE not found"
+  exit 1
+fi
 
-      - name: Install ImageMagick
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
+# Count snapshots available
+SNAPSHOTS=(wdpsnapshot_*.png)
+if [ ${#SNAPSHOTS[@]} -eq 0 ]; then
+  echo "No snapshot files found."
+  exit 1
+fi
 
-      - name: Run cropped GIF generation
-        run: bash generate-cropped-gifs.sh
+echo "Found ${#SNAPSHOTS[@]} snapshots."
 
-      - name: Commit updated GIFs to assets
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Add all .gif files that might have been created/updated
-          git add *.gif
-          if ! git diff --cached --quiet; then
-            git commit -m "Update cropped GIFs (${GITHUB_RUN_NUMBER})"
-            git push origin assets
-          else
-            echo "No changes to GIFs"
-          fi
+# Read each crop line from the config file
+while IFS=$'\t' read -r name x y w h outfile; do
+  # Skip blank or comment lines
+  [[ -z "$name" || "$name" == \#* ]] && continue
+
+  echo "--- Processing crop: $name -> $outfile ---"
+
+  # Create a temp directory for this crop's frames
+  tmpdir="tmp_${name}"
+  mkdir -p "$tmpdir"
+
+  # Crop every snapshot
+  for snap in "${SNAPSHOTS[@]}"; do
+    outframe="${tmpdir}/${snap%.png}_crop.png"
+    echo "  cropping $snap (${x},${y} ${w}x${h})"
+    convert "$snap" -crop "${w}x${h}+${x}+${y}" +repage "$outframe"
+  done
+
+  # Generate GIF from cropped frames (alphabetically, which is timestamp order)
+  convert -delay 20 -loop 0 "${tmpdir}"/*.png "$outfile"
+  echo "  GIF saved: $outfile"
+
+  # Clean up
+  rm -rf "$tmpdir"
+done < "$CROPS_FILE"
+
+echo "All crops processed."
