@@ -39,7 +39,7 @@
       align-items: center;
       justify-content: space-between;
       z-index: 20;
-      pointer-events: auto;   /* allows clicks on buttons */
+      pointer-events: auto;
     }
 
     #timestamp-label-top {
@@ -106,7 +106,6 @@
       border: none;
     }
 
-    /* On very narrow screens, make the top bar even more compact */
     @media (max-width: 500px) {
       #top-bar {
         flex-wrap: wrap;
@@ -146,16 +145,13 @@
       const sliderLabel = document.getElementById('slider-label');
       const timestampLabelTop = document.getElementById('timestamp-label-top');
 
-      // Download buttons
       const dlPlanets = document.getElementById('dl-planets');
       const dlMain = document.getElementById('dl-main');
       const dlFarEast = document.getElementById('dl-far_east');
 
-      // ---- High‑DPI setup ----
       const dpr = window.devicePixelRatio || 1;
       ctx.imageSmoothingEnabled = false;
 
-      // ---- Tile range & geographic bounds (full stitched image) ----
       const TILE_START_COL = 1225;
       const TILE_START_ROW = 513;
       const TILE_END_COL = 1231;
@@ -175,11 +171,9 @@
         east: tileX_to_lon(TILE_END_COL + 1, ZOOM)
       };
 
-      // Image dimensions
       const IMG_WIDTH = 7000;
       const IMG_HEIGHT = 6000;
 
-      // Helper: pixel coords -> lat/lon
       function pxToBounds(x, y, w, h) {
         const north = BOUNDS.north - (y / IMG_HEIGHT) * (BOUNDS.north - BOUNDS.south);
         const south = BOUNDS.north - ((y + h) / IMG_HEIGHT) * (BOUNDS.north - BOUNDS.south);
@@ -188,14 +182,13 @@
         return { north, south, west, east };
       }
 
-      // Overlay crop definitions
+      // Overlay crop definitions (y adjusted -11 px to compensate for southward offset)
       const CROPS = {
-        planets: { x: 0, y: 1360, w: 2511, h: 2100 },   // width: 2511, height: 2100
-        main:    { x: 2512, y: 1298, w: 2488, h: 2900 },
-        far_east:{ x: 5000, y: 2000, w: 2000, h: 2000 }
+        planets: { x: 0, y: 1360 - 11, w: 2511, h: 2100 },   // y=1349
+        main:    { x: 2512, y: 1298 - 11, w: 2488, h: 2900 }, // y=1287
+        far_east:{ x: 5000, y: 2000 - 11, w: 2000, h: 2000 }  // y=1989
       };
 
-      // ---- State ----
       let snapshots = [];
       let currentImage = new Image();
       let currentIndex = -1;
@@ -214,7 +207,6 @@
       let initialScale = 1.0;
       let initialPinchCenter = { x: 0, y: 0 };
 
-      // ---- Resize ----
       function resize() {
         canvas.width = window.innerWidth * dpr;
         canvas.height = window.innerHeight * dpr;
@@ -224,7 +216,6 @@
       }
       window.addEventListener('resize', resize);
 
-      // ---- Load snapshot list ----
       fetch('snapshots.json')
         .then(r => r.json())
         .then(files => {
@@ -242,7 +233,6 @@
           console.error(e);
         });
 
-      // ---- Image loading ----
       function loadSnapshot(index) {
         if (index < 0 || index >= snapshots.length) return;
         if (index === currentIndex) return;
@@ -255,8 +245,7 @@
         if (match) {
           const date = match[1];
           const time = match[2];
-          const formatted = `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)} ${time.slice(0,2)}:${time.slice(2,4)}:${time.slice(4,6)}`;
-          timestampLabelTop.textContent = formatted;
+          timestampLabelTop.textContent = `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)} ${time.slice(0,2)}:${time.slice(2,4)}:${time.slice(4,6)}`;
         } else {
           timestampLabelTop.textContent = filename;
         }
@@ -280,7 +269,6 @@
         console.error('Failed to load image:', currentImage.src);
       };
 
-      // ---- Drawing ----
       function resetView() {
         if (!currentImage.complete || currentImage.naturalWidth === 0) return;
         const imgW = currentImage.width;
@@ -303,7 +291,6 @@
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
 
-      // ---- Pan & Zoom ----
       canvas.addEventListener('mousedown', (e) => {
         e.preventDefault();
         dragging = true;
@@ -326,7 +313,6 @@
         canvas.style.cursor = 'grab';
       });
 
-      // Touch events
       canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         const touches = e.touches;
@@ -395,12 +381,10 @@
         drawImage();
       }, { passive: false });
 
-      // ---- Slider ----
       slider.addEventListener('input', () => {
         loadSnapshot(parseInt(slider.value, 10));
       });
 
-      // Keyboard
       window.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
@@ -413,14 +397,12 @@
         }
       });
 
-      // ---- Download Overlays (custom crops) ----
       function downloadOverlay(cropKey) {
         if (!currentImage.complete || currentImage.naturalWidth === 0) return;
 
         const crop = CROPS[cropKey];
         if (!crop) return;
 
-        // Create a temporary canvas for the cropped region
         const cropCanvas = document.createElement('canvas');
         cropCanvas.width = crop.w;
         cropCanvas.height = crop.h;
