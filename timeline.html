@@ -128,7 +128,7 @@
     <div id="download-group">
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
-      <button class="dl-btn" id="dl-far_east">far east</button>
+      <button class="dl-btn" id="dl-far_east">far_east</button>
     </div>
   </div>
 
@@ -282,6 +282,8 @@
       const tctx = tmp.getContext('2d');
       tctx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
       const dataUrl = tmp.toDataURL('image/png');
+      // Just for testing – open the cropped overlay image in a new tab
+      window.open(dataUrl, '_blank');
       const bounds = cropToBounds(crop.x, crop.y, crop.w, crop.h);   // exact Mercator bounds
       const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
       const ts = m ? m[0] : Date.now();
