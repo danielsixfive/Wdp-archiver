@@ -184,9 +184,9 @@
 
       // Overlay crop definitions (y adjusted -11 px to compensate for southward offset)
       const CROPS = {
-        planets: { x: 0, y: 1360 - 11, w: 2511, h: 2100 },   // y=1349
-        main:    { x: 2512, y: 1298 - 11, w: 2488, h: 2900 }, // y=1287
-        far_east:{ x: 5000, y: 2000 - 11, w: 2000, h: 2000 }  // y=1989
+        planets: { x: 0, y: 1360 , w: 2511, h: 2100 },
+        main:    { x: 2512, y: 1298, w: 2488, h: 2900 },
+        far_east:{ x: 5000, y: 2000, w: 2000, h: 2000 }
       };
 
       let snapshots = [];
@@ -410,7 +410,7 @@
         cropCtx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
 
         const dataUrl = cropCanvas.toDataURL('image/png');
-        const bounds = pxToBounds(crop.x, crop.y, crop.w, crop.h);
+        const bounds = pxToBounds(crop.x, crop.y - 11, crop.w, crop.h);
 
         const timestampMatch = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
         const timestamp = timestampMatch ? timestampMatch[0] : Date.now();
