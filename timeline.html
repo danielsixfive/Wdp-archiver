@@ -62,7 +62,7 @@
     <div id="download-group">
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
-      <button class="dl-btn" id="dl-far_east">far_east</button>
+      <button class="dl-btn" id="dl-far_east">far east</button>
     </div>
   </div>
 
@@ -148,6 +148,7 @@
     const quadBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    // These remain bound forever (we never bind another buffer after this)
     gl.enableVertexAttribArray(aPosLoc);
     gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 16, 0);
     gl.enableVertexAttribArray(aTexLoc);
@@ -191,25 +192,30 @@
     // ---- Tiled textures ----
     const MAX_TEX = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 2048); // safe limit
     console.log('Max texture size:', MAX_TEX, '(will split into tiles)');
-    let tileTextures = [];
+    let tileTextures = [];   // { tex, x, y, w, h }
 
-    function matrixMultiply3(a, b, out) {
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          out[i*3+j] = a[i*3]*b[j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j];
+    // Matrix multiplication (column‑major order)
+    function mat3mul(a, b, out) {
+      // a, b, out are Float32Arrays of length 9 (column-major)
+      for (let col = 0; col < 3; col++) {
+        const b0 = b[col*3];     // b[0][col]
+        const b1 = b[col*3+1];   // b[1][col]
+        const b2 = b[col*3+2];   // b[2][col]
+        for (let row = 0; row < 3; row++) {
+          out[col*3 + row] = a[row]    * b0 +    // a[row][0] * b[0][col]
+                             a[3 + row] * b1 +   // a[row][1] * b[1][col]
+                             a[6 + row] * b2;    // a[row][2] * b[2][col]
         }
       }
     }
 
     function createTiledTextures(image) {
-      // Delete old tiles
       tileTextures.forEach(t => gl.deleteTexture(t.tex));
       tileTextures = [];
 
       const imgW = image.width, imgH = image.height;
-      console.log(`Creating tiles from ${imgW}x${imgH} image...`);
+      console.log('Creating tiles from', imgW, 'x', imgH);
 
-      // Offscreen canvas for cropping
       const offCanvas = document.createElement('canvas');
       const offCtx = offCanvas.getContext('2d');
 
@@ -228,20 +234,17 @@
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-          // Upload tile
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, offCanvas);
-          const err = gl.getError();
-          if (err !== gl.NO_ERROR) {
-            console.error('WebGL error uploading tile at', x, y, err);
+
+          if (gl.getError() !== gl.NO_ERROR) {
+            console.error('WebGL error uploading tile at', x, y);
             gl.deleteTexture(tex);
             continue;
           }
-
           tileTextures.push({ tex, x, y, w, h });
         }
       }
-      console.log(`Created ${tileTextures.length} tiles.`);
+      console.log('Created', tileTextures.length, 'tiles.');
     }
 
     // ---- Drawing ----
@@ -252,35 +255,45 @@
       if (tileTextures.length === 0 || !currentImage.complete) return;
 
       const cssW = window.innerWidth, cssH = window.innerHeight;
+
+      // Projection: CSS pixel space -> clip space
       const proj = new Float32Array([
         2/cssW, 0, 0,
         0, -2/cssH, 0,
         -1, 1, 1
       ]);
+      // Pan (translate)
       const pan = new Float32Array([
         1, 0, 0,
         0, 1, 0,
         offsetX, offsetY, 1
       ]);
+      // Zoom (scale)
       const zoom = new Float32Array([
         scale, 0, 0,
         0, scale, 0,
         0, 0, 1
       ]);
-      const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9);
-      matrixMultiply3(pan, zoom, tmp1);
-      matrixMultiply3(proj, tmp1, tmp2);
+
+      const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9), combined = new Float32Array(9);
+      mat3mul(pan, zoom, tmp1);      // pan * zoom
+      mat3mul(proj, tmp1, tmp2);     // proj * (pan*zoom)
+
+      // Bind the quad geometry explicitly (just in case)
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
 
       // Draw each tile
       for (const tile of tileTextures) {
         gl.bindTexture(gl.TEXTURE_2D, tile.tex);
+
+        // Scale to tile's pixel position & size in the image
         const tileScale = new Float32Array([
           tile.w, 0, 0,
           0, tile.h, 0,
           tile.x, tile.y, 1
         ]);
-        const combined = new Float32Array(9);
-        matrixMultiply3(tmp2, tileScale, combined);
+        mat3mul(tmp2, tileScale, combined);   // proj*pan*zoom * tileScale
+
         gl.uniformMatrix3fv(uMatrixLoc, false, combined);
         gl.uniform1i(uTextureLoc, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -405,7 +418,7 @@
     dlMain.addEventListener('click', () => downloadOverlay('main'));
     dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
 
-    // Initial resize (water background will show until image loads)
+    // Initial resize (water background until image loads)
     resize();
   })();
 </script>
