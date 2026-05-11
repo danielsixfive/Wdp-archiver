@@ -128,7 +128,7 @@
     <div id="download-group">
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
-      <button class="dl-btn" id="dl-far_east">far_east</button>
+      <button class="dl-btn" id="dl-far_east">far east</button>
     </div>
   </div>
 
@@ -278,30 +278,23 @@ function downloadOverlay(cropKey) {
   const crop = CROPS[cropKey];
   if (!crop) return;
 
-  // ---- Canvas with cropped image (transparent) ----
+  // ---- Canvas with water-color background ----
   const tmp = document.createElement('canvas');
   tmp.width = crop.w;
   tmp.height = crop.h;
   const tctx = tmp.getContext('2d');
-  tctx.clearRect(0, 0, crop.w, crop.h);
+
+  // Fill with wplace ocean water color
+  tctx.fillStyle = '#A0BDFF';
+  tctx.fillRect(0, 0, crop.w, crop.h);
+
+  // Draw cropped image on top (transparent areas will show the water fill)
   tctx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
 
-  // ---- Data‑URL for the overlay JSON ----
+  // Export as opaque PNG
   const dataUrl = tmp.toDataURL('image/png');
 
-  // ---- Download a valid PNG for visual inspection (test only) ----
-  tmp.toBlob(function(blob) {
-    const url = URL.createObjectURL(blob);
-    const aPng = document.createElement('a');
-    aPng.href = url;
-    aPng.download = `${cropKey}_test.png`;
-    document.body.appendChild(aPng);
-    aPng.click();
-    document.body.removeChild(aPng);
-    URL.revokeObjectURL(url);
-  }, 'image/png');
-
-  // ---- Build overlay JSON ----
+  // Build overlay JSON
   const bounds = cropToBounds(crop.x, crop.y, crop.w, crop.h);
   const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
   const ts = m ? m[0] : Date.now();
