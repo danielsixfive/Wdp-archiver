@@ -129,10 +129,6 @@
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
       <button class="dl-btn" id="dl-far_east">far_east</button>
-      <input type="number" id="test-size" placeholder="size (px)" 
-       style="width:80px; background:#333; color:white; border:1px solid #888; 
-              border-radius:4px; padding:2px 4px; font-size:0.8rem;">
-<button class="dl-btn" id="dl-test">test</button>
     </div>
   </div>
 
@@ -326,54 +322,6 @@ function downloadOverlay(cropKey) {
     dlPlanets.addEventListener('click', () => downloadOverlay('planets'));
     dlMain.addEventListener('click', () => downloadOverlay('main'));
     dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
-
-//delete this later
-function testSize(size) {
-  if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-  if (size <= 0 || isNaN(size)) return;
-
-  const tmp = document.createElement('canvas');
-  tmp.width = size;
-  tmp.height = size;
-  const tctx = tmp.getContext('2d');
-  tctx.clearRect(0, 0, size, size);
-  tctx.drawImage(currentImage, 0, 0, size, size, 0, 0, size, size);
-
-  const dataUrl = tmp.toDataURL('image/png');
-  const bounds = cropToBounds(0, 0, size, size);
-  const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
-  const ts = m ? m[0] : Date.now();
-
-  const overlay = {
-    id: `wdp_test_${size}_${ts}`,
-    schemaVersion: "1",
-    name: `test_${size}_${ts}.png`,
-    opacity: 1,
-    image: { dataUrl, width: size, height: size },
-    bounds,
-    colorMetric: "lab",
-    dithering: false,
-    order: 0,
-    locked: false,
-    hasPlaced: true,
-    visible: true
-  };
-
-  const blob = new Blob([JSON.stringify(overlay)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `test_${size}_${ts}.wplace`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-document.getElementById('dl-test').addEventListener('click', () => {
-  const size = parseInt(document.getElementById('test-size').value, 10);
-  testSize(size);
-});
     
     resize();
   })();
