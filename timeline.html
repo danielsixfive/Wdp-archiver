@@ -129,7 +129,10 @@
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
       <button class="dl-btn" id="dl-far_east">far east</button>
-      <button class="dl-btn" id="dl-test">test 500px</button>
+      <input type="number" id="test-size" placeholder="size (px)" 
+       style="width:80px; background:#333; color:white; border:1px solid #888; 
+              border-radius:4px; padding:2px 4px; font-size:0.8rem;">
+<button class="dl-btn" id="dl-test">test</button>
     </div>
   </div>
 
@@ -330,24 +333,28 @@ function downloadOverlay(cropKey) {
     dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
 
 //delete this later
-document.getElementById('dl-test').addEventListener('click', () => {
-  const testCrop = { x: 0, y: 0, w: 500, h: 500 };
-  // Use a fresh canvas with transparency (no water fill)
+function testSize(size) {
+  if (!currentImage.complete || currentImage.naturalWidth === 0) return;
+  if (size <= 0 || isNaN(size)) return;
+
   const tmp = document.createElement('canvas');
-  tmp.width = 500; tmp.height = 500;
+  tmp.width = size;
+  tmp.height = size;
   const tctx = tmp.getContext('2d');
-  tctx.clearRect(0, 0, 500, 500);
-  tctx.drawImage(currentImage, 0, 0, 500, 500, 0, 0, 500, 500);
+  tctx.clearRect(0, 0, size, size);
+  tctx.drawImage(currentImage, 0, 0, size, size, 0, 0, size, size);
+
   const dataUrl = tmp.toDataURL('image/png');
-  const bounds = cropToBounds(0, 0, 500, 500);
+  const bounds = cropToBounds(0, 0, size, size);
   const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
   const ts = m ? m[0] : Date.now();
+
   const overlay = {
-    id: `wdp_test_${ts}`,
+    id: `wdp_test_${size}_${ts}`,
     schemaVersion: "1",
-    name: `test_${ts}.png`,
+    name: `test_${size}_${ts}.png`,
     opacity: 1,
-    image: { dataUrl, width: 500, height: 500 },
+    image: { dataUrl, width: size, height: size },
     bounds,
     colorMetric: "lab",
     dithering: false,
@@ -356,12 +363,21 @@ document.getElementById('dl-test').addEventListener('click', () => {
     hasPlaced: true,
     visible: true
   };
+
   const blob = new Blob([JSON.stringify(overlay)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `wdp_test_${ts}.wplace`;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = `test_${size}_${ts}.wplace`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('dl-test').addEventListener('click', () => {
+  const size = parseInt(document.getElementById('test-size').value, 10);
+  testSize(size);
 });
     
     resize();
