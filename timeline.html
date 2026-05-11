@@ -6,117 +6,51 @@
   <title>WDP timeline viewer</title>
   <style>
     * { box-sizing: border-box; }
-
     body, html {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: #000;
-      font-family: sans-serif;
-      color: white;
+      margin: 0; padding: 0; overflow: hidden;
+      background: #000; font-family: sans-serif; color: white;
     }
-
     #canvas {
-      display: block;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-      touch-action: none;
-      cursor: grab;
+      display: block; image-rendering: pixelated; image-rendering: crisp-edges;
+      touch-action: none; cursor: grab;
     }
-    #canvas:active {
-      cursor: grabbing;
-    }
+    #canvas:active { cursor: grabbing; }
 
-    /* ---- Top banner: timestamp + download links ---- */
     #top-bar {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0, 0, 0, 0.75);
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      z-index: 20;
-      pointer-events: auto;
+      position: absolute; top: 0; left: 0; right: 0;
+      background: rgba(0,0,0,0.75); padding: 8px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      z-index: 20; pointer-events: auto;
     }
-
     #timestamp-label-top {
-      font-size: 1rem;
-      font-weight: bold;
-      text-align: center;
-      flex: 1;
+      font-size: 1rem; font-weight: bold; text-align: center; flex: 1;
     }
-
-    #download-group {
-      display: flex;
-      gap: 6px;
-    }
-
+    #download-group { display: flex; gap: 6px; }
     .dl-btn {
-      font-size: 0.8rem;
-      padding: 4px 8px;
-      background: #444;
-      color: white;
-      border: 1px solid #888;
-      border-radius: 4px;
-      cursor: pointer;
-      white-space: nowrap;
+      font-size: 0.8rem; padding: 4px 8px;
+      background: #444; color: white; border: 1px solid #888;
+      border-radius: 4px; cursor: pointer; white-space: nowrap;
     }
 
-    /* ---- Bottom controls: slider + label ---- */
     #controls {
-      position: absolute;
-      bottom: 20px;
-      left: 5%;
-      right: 5%;
-      background: rgba(0, 0, 0, 0.75);
-      border-radius: 8px;
-      padding: 10px 16px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      z-index: 20;
+      position: absolute; bottom: 20px; left: 5%; right: 5%;
+      background: rgba(0,0,0,0.75); border-radius: 8px;
+      padding: 10px 16px; display: flex; flex-direction: column;
+      align-items: center; gap: 4px; z-index: 20;
     }
-
-    #slider-label {
-      font-size: 0.85rem;
-      opacity: 0.9;
-      pointer-events: none;
-    }
-
+    #slider-label { font-size: 0.85rem; opacity: 0.9; pointer-events: none; }
     #slider {
-      width: 100%;
-      height: 6px;
-      -webkit-appearance: none;
-      background: #555;
-      border-radius: 3px;
-      outline: none;
+      width: 100%; height: 6px; -webkit-appearance: none;
+      background: #555; border-radius: 3px; outline: none;
     }
-
     #slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 22px;
-      height: 22px;
-      background: white;
-      border-radius: 50%;
-      cursor: pointer;
-      border: none;
+      -webkit-appearance: none; width: 22px; height: 22px;
+      background: white; border-radius: 50%; cursor: pointer; border: none;
     }
 
     @media (max-width: 500px) {
-      #top-bar {
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 6px;
-      }
-      #download-group {
-        order: 1;
-        width: 100%;
-        justify-content: center;
-      }
+      #top-bar { flex-wrap: wrap; justify-content: center; gap: 6px; }
+      #download-group { order: 1; width: 100%; justify-content: center; }
     }
   </style>
 </head>
@@ -128,7 +62,7 @@
     <div id="download-group">
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
-      <button class="dl-btn" id="dl-far_east">far_east</button>
+      <button class="dl-btn" id="dl-far_east">far east</button>
     </div>
   </div>
 
@@ -139,35 +73,116 @@
 
 <script>
   (function() {
+    // ---- DOM elements ----
     const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
     const slider = document.getElementById('slider');
     const timestampLabelTop = document.getElementById('timestamp-label-top');
     const dlPlanets = document.getElementById('dl-planets');
     const dlMain = document.getElementById('dl-main');
     const dlFarEast = document.getElementById('dl-far_east');
 
-    const dpr = window.devicePixelRatio || 1;
-    ctx.imageSmoothingEnabled = false;
+    // ---- WebGL setup ----
+    const gl = canvas.getContext('webgl', { antialias: false });
+    if (!gl) {
+      document.body.innerHTML = 'WebGL not supported – please use a modern browser.';
+      return;
+    }
 
-    // ---- Map / tile constants ----
+    // Simple shaders: just draw a texture
+    const vertexSrc = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      varying vec2 v_texCoord;
+      uniform mat3 u_matrix;
+      void main() {
+        vec3 pos = u_matrix * vec3(a_position, 1.0);
+        gl_Position = vec4(pos.xy, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+      }
+    `;
+    const fragmentSrc = `
+      precision mediump float;
+      varying vec2 v_texCoord;
+      uniform sampler2D u_texture;
+      void main() {
+        gl_FragColor = texture2D(u_texture, v_texCoord);
+      }
+    `;
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexSrc));
+    gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSrc));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error('WebGL program failed to link');
+      return;
+    }
+    gl.useProgram(program);
+
+    // Determine attribute/uniform locations
+    const aPosLoc = gl.getAttribLocation(program, 'a_position');
+    const aTexLoc = gl.getAttribLocation(program, 'a_texCoord');
+    const uMatrixLoc = gl.getUniformLocation(program, 'u_matrix');
+
+    // ---- Geometry (two triangles covering [0,1]x[0,1] - we'll scale as needed) ----
+    const quadVertices = new Float32Array([
+      0, 0,  0, 1,
+      1, 0,  1, 1,
+      0, 1,  0, 0,
+      1, 0,  1, 1,
+      0, 1,  0, 0,
+      1, 1,  1, 0
+    ]);
+
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(aPosLoc);
+    gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(aTexLoc);
+    gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
+
+    // Create a texture (will be updated with the current snapshot)
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // THE MAGIC: NEAREST filtering = blocky pixels
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    // ---- Map constants ----
     const ZOOM = 11;
     const TILE_SIZE = 1000;
-    const TOTAL_TILES = Math.pow(2, ZOOM);        // 2048
-    const WORLD_SIZE = TOTAL_TILES * TILE_SIZE;   // 2,048,000 px
-    const START_COL = 1225, START_ROW = 513;      // our stitched area
+    const TOTAL_TILES = Math.pow(2, ZOOM);
+    const WORLD_SIZE = TOTAL_TILES * TILE_SIZE;
+    const START_COL = 1225, START_ROW = 513;
 
     function worldYToLat(yPx) {
-      const mercatorY = 1 - 2 * yPx / WORLD_SIZE;
-      return (2 * Math.atan(Math.exp(Math.PI * mercatorY)) - Math.PI / 2) * 180 / Math.PI;
+      const mcY = 1 - 2 * yPx / WORLD_SIZE;
+      return (2 * Math.atan(Math.exp(Math.PI * mcY)) - Math.PI / 2) * 180 / Math.PI;
     }
     function worldXToLon(xPx) {
       return (xPx / WORLD_SIZE) * 360 - 180;
     }
     function pixelToLatLon(px, py) {
-      const globalX = START_COL * TILE_SIZE + px;
-      const globalY = START_ROW * TILE_SIZE + py;
-      return { lat: worldYToLat(globalY), lon: worldXToLon(globalX) };
+      const gx = START_COL * TILE_SIZE + px;
+      const gy = START_ROW * TILE_SIZE + py;
+      return { lat: worldYToLat(gy), lon: worldXToLon(gx) };
     }
     function cropToBounds(x, y, w, h) {
       const nw = pixelToLatLon(x, y);
@@ -175,30 +190,137 @@
       return { north: nw.lat, south: se.lat, west: nw.lon, east: se.lon };
     }
 
-    // Crops (unchanged)
     const CROPS = {
       planets:  { x: 0,     y: 1360, w: 2511, h: 2100 },
       main:     { x: 2512,  y: 1298, w: 2488, h: 2900 },
       far_east: { x: 5000,  y: 2000, w: 2000, h: 2000 }
     };
 
+    // ---- State ----
     let snapshots = [];
     let currentImage = new Image();
     let currentIndex = -1, requestedIndex = -1;
     let offsetX = 0, offsetY = 0, scale = 1.0;
     const MIN_SCALE = 0.1, MAX_SCALE = 10.0;
+
     let dragging = false, dragStartX = 0, dragStartY = 0, dragOffsetX = 0, dragOffsetY = 0;
     let initialPinchDistance = 0, initialScale = 1.0, initialPinchCenter = { x: 0, y: 0 };
 
+    // ---- Resize & draw ----
     function resize() {
+      const dpr = window.devicePixelRatio || 1;
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = window.innerWidth + 'px';
       canvas.style.height = window.innerHeight + 'px';
-      drawImage();
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      drawScene();
     }
     window.addEventListener('resize', resize);
 
+    function resetView() {
+      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
+      const w = currentImage.width, h = currentImage.height;
+      const ww = window.innerWidth, wh = window.innerHeight;
+      scale = Math.min(ww / w, wh / h);
+      offsetX = (ww - w * scale) / 2;
+      offsetY = (wh - h * scale) / 2;
+      drawScene();
+    }
+
+    // Build the transformation matrix and render the quad
+    function drawScene() {
+      gl.clearColor(0.627, 0.741, 1.0, 1.0);  // water blue #A0BDFF
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
+
+      // Upload image to texture (only if image changed)
+      // We'll re-upload each time a new snapshot loads; for pan/zoom just redraw.
+      // For efficiency, we only call texImage2D when image is new (handled in onload).
+
+      // Matrix: map from object space [0, w] x [0, h] to clip space [-1,1]
+      const imgW = currentImage.width;
+      const imgH = currentImage.height;
+      // We want to draw a quad from (0,0) to (imgW, imgH) transformed by pan/zoom,
+      // and then project to clip space (canvas coordinates).
+      // The canvas physical size is canvas.width x canvas.height, which is display* dpr.
+      const cw = canvas.width;   // physical pixels
+      const ch = canvas.height;
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = window.innerWidth;
+      const cssH = window.innerHeight;
+
+      // Basic projection: CSS pixel space to clip space
+      // 2/cssW, 0, -1, 0, 2/cssH, -1, 0, 0, 1
+      // Then apply pan: translate(offX, offY)
+      // Then apply zoom: scale(scale, scale)
+      // The image itself ranges (0,imgW) in x and (0,imgH) in y.
+      // So final matrix = projection * pan * zoom
+
+      const proj = new Float32Array([
+        2/cssW, 0, 0,
+        0, -2/cssH, 0,
+        -1, 1, 1
+      ]);
+      // pan
+      const pan = new Float32Array([
+        1, 0, 0,
+        0, 1, 0,
+        offsetX, offsetY, 1
+      ]);
+      // zoom
+      const zoom = new Float32Array([
+        scale, 0, 0,
+        0, scale, 0,
+        0, 0, 1
+      ]);
+      // Multiply: proj * pan * zoom
+      const tmp = new Float32Array(9);
+      matrixMultiply3(pan, zoom, tmp);
+      matrixMultiply3(proj, tmp, tmp);
+
+      // Since WebGL coordinates have Y flipped (0 at bottom), we already flipped in proj (negative 2/cssH).
+      // The image Y=0 is top, but our quad Y=0 is top? We'll adjust in texcoords.
+      // The quad vertices are [0,0] top-left, [1,0] top-right, [0,1] bottom-left, [1,1] bottom-right.
+      // But in image coordinates, top-left is (0,0) and bottom-right is (imgW,imgH).
+      // We'll set the attribute positions accordingly.
+
+      // Actually, we'll just redo the quad more directly:
+      // Positions: x and y of the quad corners in image pixels, but after pan/zoom they are in CSS pixels.
+      // We'll pass the image width/height as uniforms to scale the quad to [0,w] range.
+      // Simpler: create a uniform that holds the image size, and the matrix will handle transformation.
+
+      // Let's just use the approach of drawing a quad from (0,0) to (imgW, imgH) using the same shader but with a modified projection.
+      // Our current quad vertices are in unit square. We'll scale them by imgW, imgH using the matrix.
+
+      const scaleMat = new Float32Array([
+        imgW, 0, 0,
+        0, imgH, 0,
+        0, 0, 1
+      ]);
+      const combined = new Float32Array(9);
+      matrixMultiply3(tmp, scaleMat, combined);
+
+      gl.uniformMatrix3fv(uMatrixLoc, false, combined);
+
+      // Draw
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function matrixMultiply3(a, b, out) {
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          let sum = 0;
+          for (let k = 0; k < 3; k++) {
+            sum += a[i*3 + k] * b[k*3 + j];
+          }
+          out[i*3 + j] = sum;
+        }
+      }
+    }
+
+    // ---- Snapshot loading ----
     fetch('snapshots.json')
       .then(r => r.json())
       .then(files => {
@@ -225,46 +347,31 @@
 
     currentImage.onload = () => {
       if (currentIndex !== requestedIndex) {
-        if (currentIndex === -1) { currentIndex = requestedIndex; resetView(); }
-        else { currentIndex = requestedIndex; drawImage(); }
+        // Upload image to WebGL texture
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, currentImage);
+        // Set texture size (not strictly necessary if we use texImage2D with image element)
+
+        if (currentIndex === -1) {
+          currentIndex = requestedIndex;
+          resetView();
+        } else {
+          currentIndex = requestedIndex;
+          drawScene();
+        }
       }
     };
     currentImage.onerror = () => console.error('Image failed:', currentImage.src);
 
-    function resetView() {
-      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-      const w = currentImage.width, h = currentImage.height;
-      const ww = window.innerWidth, wh = window.innerHeight;
-      scale = Math.min(ww / w, wh / h);
-      offsetX = (ww - w * scale) / 2;
-      offsetY = (wh - h * scale) / 2;
-      drawImage();
-    }
-
-    function drawImage() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Fill with wplace water color for transparent areas
-  ctx.fillStyle = '#A0BDFF';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.translate(offsetX, offsetY);
-  ctx.scale(scale, scale);
-  ctx.drawImage(currentImage, 0, 0);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-}
-
-    // Pan & zoom events (unchanged)...
+    // ---- Pan & Zoom ----
     canvas.addEventListener('mousedown', e => { e.preventDefault(); dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragOffsetX = offsetX; dragOffsetY = offsetY; canvas.style.cursor = 'grabbing'; });
-    window.addEventListener('mousemove', e => { if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawImage(); });
+    window.addEventListener('mousemove', e => { if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawScene(); });
     window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
+
     canvas.addEventListener('touchstart', e => { e.preventDefault(); const t = e.touches; if (t.length===1) { dragging=true; dragStartX=t[0].clientX; dragStartY=t[0].clientY; dragOffsetX=offsetX; dragOffsetY=offsetY; } else if (t.length===2) { dragging=false; const dx=t[1].clientX-t[0].clientX, dy=t[1].clientY-t[0].clientY; initialPinchDistance=Math.hypot(dx,dy); initialScale=scale; initialPinchCenter={x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2}; } }, {passive:false});
-    canvas.addEventListener('touchmove', e => { e.preventDefault(); const t=e.touches; if (t.length===1 && dragging) { offsetX=dragOffsetX+(t[0].clientX-dragStartX); offsetY=dragOffsetY+(t[0].clientY-dragStartY); drawImage(); } else if (t.length===2) { const dx=t[1].clientX-t[0].clientX, dy=t[1].clientY-t[0].clientY; const nd=Math.hypot(dx,dy); if(initialPinchDistance>0){ const ns=initialScale*(nd/initialPinchDistance); scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,ns)); const cx=(t[0].clientX+t[1].clientX)/2, cy=(t[0].clientY+t[1].clientY)/2; const sc=scale/initialScale; offsetX=cx-sc*(initialPinchCenter.x-offsetX); offsetY=cy-sc*(initialPinchCenter.y-offsetY); initialPinchCenter={x:cx,y:cy}; initialScale=scale; initialPinchDistance=nd; drawImage(); } } }, {passive:false});
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); const t=e.touches; if (t.length===1 && dragging) { offsetX=dragOffsetX+(t[0].clientX-dragStartX); offsetY=dragOffsetY+(t[0].clientY-dragStartY); drawScene(); } else if (t.length===2) { const dx=t[1].clientX-t[0].clientX, dy=t[1].clientY-t[0].clientY; const nd=Math.hypot(dx,dy); if(initialPinchDistance>0){ const ns=initialScale*(nd/initialPinchDistance); scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,ns)); const cx=(t[0].clientX+t[1].clientX)/2, cy=(t[0].clientY+t[1].clientY)/2; const sc=scale/initialScale; offsetX=cx-sc*(initialPinchCenter.x-offsetX); offsetY=cy-sc*(initialPinchCenter.y-offsetY); initialPinchCenter={x:cx,y:cy}; initialScale=scale; initialPinchDistance=nd; drawScene(); } } }, {passive:false});
     canvas.addEventListener('touchend', () => { dragging=false; initialPinchDistance=0; });
-    canvas.addEventListener('wheel', e => { e.preventDefault(); const zf=1.1, old=scale; if(e.deltaY<0) scale*=zf; else scale/=zf; scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,scale)); const sc=scale/old; offsetX=e.clientX-sc*(e.clientX-offsetX); offsetY=e.clientY-sc*(e.clientY-offsetY); drawImage(); }, {passive:false});
+    canvas.addEventListener('wheel', e => { e.preventDefault(); const zf=1.1, old=scale; if(e.deltaY<0) scale*=zf; else scale/=zf; scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,scale)); const sc=scale/old; offsetX=e.clientX-sc*(e.clientX-offsetX); offsetY=e.clientY-sc*(e.clientY-offsetY); drawScene(); }, {passive:false});
 
     slider.addEventListener('input', () => loadSnapshot(parseInt(slider.value,10)));
     window.addEventListener('keydown', e => {
@@ -273,56 +380,47 @@
       else if(e.key==='r'||e.key==='R') resetView();
     });
 
-function downloadOverlay(cropKey) {
-  if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-  const crop = CROPS[cropKey];
-  if (!crop) return;
+    // ---- Overlay download (transparent) ----
+    function downloadOverlay(cropKey) {
+      if (!currentImage.complete || currentImage.naturalWidth===0) return;
+      const crop = CROPS[cropKey];
+      if (!crop) return;
+      const tmp = document.createElement('canvas');
+      tmp.width = crop.w; tmp.height = crop.h;
+      const tctx = tmp.getContext('2d');
+      tctx.clearRect(0, 0, crop.w, crop.h);
+      tctx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+      const dataUrl = tmp.toDataURL('image/png');
+      const bounds = cropToBounds(crop.x, crop.y, crop.w, crop.h);
+      const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
+      const ts = m ? m[0] : Date.now();
+      const overlay = {
+        id: `wdp_${cropKey}_${ts}`,
+        schemaVersion: "1",
+        name: `${cropKey}_${ts}.png`,
+        opacity: 1,
+        image: { dataUrl, width: crop.w, height: crop.h },
+        bounds,
+        colorMetric: "lab",
+        dithering: false,
+        order: 0,
+        locked: false,
+        hasPlaced: true,
+        visible: true
+      };
+      const blob = new Blob([JSON.stringify(overlay)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `wdp_${cropKey}_${ts}.wplace`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
 
-  // ---- Transparent canvas with cropped area ----
-  const tmp = document.createElement('canvas');
-  tmp.width = crop.w;
-  tmp.height = crop.h;
-  const tctx = tmp.getContext('2d');
-  tctx.clearRect(0, 0, crop.w, crop.h);
-  tctx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
-
-  // ---- Data URL and bounds ----
-  const dataUrl = tmp.toDataURL('image/png');
-  const bounds = cropToBounds(crop.x, crop.y, crop.w, crop.h);
-  const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
-  const ts = m ? m[0] : Date.now();
-
-  // ---- Build overlay JSON (no extra compositing) ----
-  const overlay = {
-    id: `wdp_${cropKey}_${ts}`,
-    schemaVersion: "1",
-    name: `${cropKey}_${ts}.png`,
-    opacity: 1,
-    image: { dataUrl, width: crop.w, height: crop.h },
-    bounds,
-    colorMetric: "lab",
-    dithering: false,
-    order: 0,
-    locked: false,
-    hasPlaced: true,
-    visible: true
-  };
-
-  const blob = new Blob([JSON.stringify(overlay)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `wdp_${cropKey}_${ts}.wplace`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-    
     dlPlanets.addEventListener('click', () => downloadOverlay('planets'));
     dlMain.addEventListener('click', () => downloadOverlay('main'));
     dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
-    
+
+    // Initial resize
     resize();
   })();
 </script>
