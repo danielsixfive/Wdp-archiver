@@ -62,7 +62,7 @@
     <div id="download-group">
       <button class="dl-btn" id="dl-planets">planets</button>
       <button class="dl-btn" id="dl-main">main</button>
-      <button class="dl-btn" id="dl-far_east">far_east</button>
+      <button class="dl-btn" id="dl-far_east">far east</button>
     </div>
   </div>
 
@@ -81,12 +81,14 @@
     const dlFarEast = document.getElementById('dl-far_east');
 
     // ---- WebGL setup ----
-    const gl = canvas.getContext('webgl', { antialias: false });
+    const gl = canvas.getContext('webgl', { antialias: false }) ||
+               canvas.getContext('experimental-webgl', { antialias: false });
     if (!gl) {
       document.body.innerHTML = 'WebGL not supported – please use a modern browser.';
       return;
     }
 
+    // Shaders
     const vertexSrc = `
       attribute vec2 a_position;
       attribute vec2 a_texCoord;
@@ -112,7 +114,7 @@
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error(gl.getShaderInfoLog(shader));
+        console.error('Shader error:', gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
       }
@@ -124,7 +126,7 @@
     gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSrc));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error('WebGL program failed to link');
+      console.error('Link error:', gl.getProgramInfoLog(program));
       return;
     }
     gl.useProgram(program);
@@ -132,38 +134,11 @@
     const aPosLoc = gl.getAttribLocation(program, 'a_position');
     const aTexLoc = gl.getAttribLocation(program, 'a_texCoord');
     const uMatrixLoc = gl.getUniformLocation(program, 'u_matrix');
-
-    // Full‑screen quad (unit square 0‑1, repeated to 6 verts)
-    const quadVertices = new Float32Array([
-      0, 0, 0, 1,
-      1, 0, 1, 1,
-      0, 1, 0, 0,
-      1, 0, 1, 1,
-      0, 1, 0, 0,
-      1, 1, 1, 0
-    ]);
-
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(aPosLoc);
-    gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 16, 0);
-    gl.enableVertexAttribArray(aTexLoc);
-    gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
-
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    // NEAREST = crisp pixels
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const uTextureLoc = gl.getUniformLocation(program, 'u_texture');
 
     // ---- Map constants ----
-    const ZOOM = 11;
-    const TILE_SIZE = 1000;
-    const TOTAL_TILES = Math.pow(2, ZOOM);
-    const WORLD_SIZE = TOTAL_TILES * TILE_SIZE;
+    const ZOOM = 11, TILE_SIZE = 1000;
+    const TOTAL_TILES = Math.pow(2, ZOOM), WORLD_SIZE = TOTAL_TILES * TILE_SIZE;
     const START_COL = 1225, START_ROW = 513;
 
     function worldYToLat(yPx) {
@@ -174,13 +149,11 @@
       return (xPx / WORLD_SIZE) * 360 - 180;
     }
     function pixelToLatLon(px, py) {
-      const gx = START_COL * TILE_SIZE + px;
-      const gy = START_ROW * TILE_SIZE + py;
+      const gx = START_COL * TILE_SIZE + px, gy = START_ROW * TILE_SIZE + py;
       return { lat: worldYToLat(gy), lon: worldXToLon(gx) };
     }
     function cropToBounds(x, y, w, h) {
-      const nw = pixelToLatLon(x, y);
-      const se = pixelToLatLon(x + w, y + h);
+      const nw = pixelToLatLon(x, y), se = pixelToLatLon(x + w, y + h);
       return { north: nw.lat, south: se.lat, west: nw.lon, east: se.lon };
     }
 
@@ -200,7 +173,113 @@
     let dragging = false, dragStartX = 0, dragStartY = 0, dragOffsetX = 0, dragOffsetY = 0;
     let initialPinchDistance = 0, initialScale = 1.0, initialPinchCenter = { x: 0, y: 0 };
 
-    // ---- Resize & draw ----
+    // ---- Tiled textures ----
+    const MAX_TEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    console.log('Max texture size:', MAX_TEX);
+    let tileTextures = [];       // array of { tex, x, y, w, h }
+    const quadBuffer = gl.createBuffer();   // reusable quad (unit square)
+
+    function matrixMultiply3(a, b, out) {
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          out[i*3 + j] = a[i*3]*b[0+j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j];
+        }
+      }
+    }
+
+    function createTiledTextures(image) {
+      // Delete old textures
+      tileTextures.forEach(t => gl.deleteTexture(t.tex));
+      tileTextures = [];
+
+      const imgW = image.width, imgH = image.height;
+      const tileSize = Math.min(MAX_TEX, 4096);   // safe limit
+
+      // Use an offscreen canvas to extract tiles
+      const offCanvas = document.createElement('canvas');
+      const offCtx = offCanvas.getContext('2d');
+
+      for (let y = 0; y < imgH; y += tileSize) {
+        for (let x = 0; x < imgW; x += tileSize) {
+          const w = Math.min(tileSize, imgW - x);
+          const h = Math.min(tileSize, imgH - y);
+          offCanvas.width = w;
+          offCanvas.height = h;
+          offCtx.clearRect(0, 0, w, h);
+          offCtx.drawImage(image, x, y, w, h, 0, 0, w, h);
+
+          const tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, offCanvas);
+          tileTextures.push({ tex, x, y, w, h });
+        }
+      }
+    }
+
+    function drawScene() {
+      gl.clearColor(0.627, 0.741, 1.0, 1.0);  // water blue #A0BDFF
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      if (tileTextures.length === 0 || !currentImage.complete) return;
+
+      const cssW = window.innerWidth, cssH = window.innerHeight;
+      const proj = new Float32Array([
+        2/cssW, 0, 0,
+        0, -2/cssH, 0,
+        -1, 1, 1
+      ]);
+      const pan = new Float32Array([
+        1, 0, 0,
+        0, 1, 0,
+        offsetX, offsetY, 1
+      ]);
+      const zoom = new Float32Array([
+        scale, 0, 0,
+        0, scale, 0,
+        0, 0, 1
+      ]);
+      const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9);
+      matrixMultiply3(pan, zoom, tmp1);
+      matrixMultiply3(proj, tmp1, tmp2);
+
+      // Draw each tile
+      for (const tile of tileTextures) {
+        gl.bindTexture(gl.TEXTURE_2D, tile.tex);
+        // Scale matrix for this tile's dimensions and position within the image
+        const tileScale = new Float32Array([
+          tile.w, 0, 0,
+          0, tile.h, 0,
+          tile.x, tile.y, 1
+        ]);
+        const combined = new Float32Array(9);
+        matrixMultiply3(tmp2, tileScale, combined);
+        gl.uniformMatrix3fv(uMatrixLoc, false, combined);
+        gl.uniform1i(uTextureLoc, 0);  // texture unit 0
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+    }
+
+    // Initialise static quad geometry
+    const quadVertices = new Float32Array([
+      0, 0, 0, 1,
+      1, 0, 1, 1,
+      0, 1, 0, 0,
+      1, 0, 1, 1,
+      0, 1, 0, 0,
+      1, 1, 1, 0
+    ]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(aPosLoc);
+    gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(aTexLoc);
+    gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
+
+    // ---- Resize ----
     function resize() {
       const dpr = window.devicePixelRatio || 1;
       canvas.width = window.innerWidth * dpr;
@@ -220,64 +299,6 @@
       offsetX = (ww - w * scale) / 2;
       offsetY = (wh - h * scale) / 2;
       drawScene();
-    }
-
-    function matrixMultiply3(a, b, out) {
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          let sum = 0;
-          for (let k = 0; k < 3; k++) {
-            sum += a[i*3 + k] * b[k*3 + j];
-          }
-          out[i*3 + j] = sum;
-        }
-      }
-    }
-
-    function drawScene() {
-      gl.clearColor(0.627, 0.741, 1.0, 1.0);  // water blue #A0BDFF
-      gl.clear(gl.COLOR_BUFFER_BIT);
-
-      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
-
-      const imgW = currentImage.width;
-      const imgH = currentImage.height;
-      const cssW = window.innerWidth;
-      const cssH = window.innerHeight;
-
-      // Projection: CSS pixel space → clip space
-      const proj = new Float32Array([
-        2/cssW, 0, 0,
-        0, -2/cssH, 0,
-        -1, 1, 1
-      ]);
-      // Pan
-      const pan = new Float32Array([
-        1, 0, 0,
-        0, 1, 0,
-        offsetX, offsetY, 1
-      ]);
-      // Zoom
-      const zoom = new Float32Array([
-        scale, 0, 0,
-        0, scale, 0,
-        0, 0, 1
-      ]);
-      // Scale to image dimensions
-      const imgScale = new Float32Array([
-        imgW, 0, 0,
-        0, imgH, 0,
-        0, 0, 1
-      ]);
-
-      // Multiply: proj * pan * zoom * imgScale
-      const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9), combined = new Float32Array(9);
-      matrixMultiply3(pan, zoom, tmp1);
-      matrixMultiply3(proj, tmp1, tmp2);
-      matrixMultiply3(tmp2, imgScale, combined);
-
-      gl.uniformMatrix3fv(uMatrixLoc, false, combined);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
     // ---- Snapshot loading ----
@@ -307,9 +328,8 @@
 
     currentImage.onload = () => {
       if (currentIndex !== requestedIndex) {
-        // Upload image to WebGL texture
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, currentImage);
+        // Rebuild tiles for the new image
+        createTiledTextures(currentImage);
 
         if (currentIndex === -1) {
           currentIndex = requestedIndex;
@@ -322,11 +342,10 @@
     };
     currentImage.onerror = () => console.error('Image failed:', currentImage.src);
 
-    // ---- Pan & Zoom events ----
+    // ---- Pan & Zoom events (unchanged) ----
     canvas.addEventListener('mousedown', e => { e.preventDefault(); dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragOffsetX = offsetX; dragOffsetY = offsetY; canvas.style.cursor = 'grabbing'; });
     window.addEventListener('mousemove', e => { if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawScene(); });
     window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
-
     canvas.addEventListener('touchstart', e => { e.preventDefault(); const t = e.touches; if (t.length===1) { dragging=true; dragStartX=t[0].clientX; dragStartY=t[0].clientY; dragOffsetX=offsetX; dragOffsetY=offsetY; } else if (t.length===2) { dragging=false; const dx=t[1].clientX-t[0].clientX, dy=t[1].clientY-t[0].clientY; initialPinchDistance=Math.hypot(dx,dy); initialScale=scale; initialPinchCenter={x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2}; } }, {passive:false});
     canvas.addEventListener('touchmove', e => { e.preventDefault(); const t=e.touches; if (t.length===1 && dragging) { offsetX=dragOffsetX+(t[0].clientX-dragStartX); offsetY=dragOffsetY+(t[0].clientY-dragStartY); drawScene(); } else if (t.length===2) { const dx=t[1].clientX-t[0].clientX, dy=t[1].clientY-t[0].clientY; const nd=Math.hypot(dx,dy); if(initialPinchDistance>0){ const ns=initialScale*(nd/initialPinchDistance); scale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,ns)); const cx=(t[0].clientX+t[1].clientX)/2, cy=(t[0].clientY+t[1].clientY)/2; const sc=scale/initialScale; offsetX=cx-sc*(initialPinchCenter.x-offsetX); offsetY=cy-sc*(initialPinchCenter.y-offsetY); initialPinchCenter={x:cx,y:cy}; initialScale=scale; initialPinchDistance=nd; drawScene(); } } }, {passive:false});
     canvas.addEventListener('touchend', () => { dragging=false; initialPinchDistance=0; });
@@ -380,6 +399,7 @@
     dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
 
     resize();
+    console.log('Viewer ready. Tiles:', tileTextures.length);
   })();
 </script>
 </body>
