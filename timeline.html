@@ -131,7 +131,7 @@
     }
     gl.useProgram(program);
 
-    // ---- Enable transparency (alpha blending) ----
+    // ---- Alpha blending for transparency ----
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -140,14 +140,15 @@
     const uMatrixLoc = gl.getUniformLocation(program, 'u_matrix');
     const uTextureLoc = gl.getUniformLocation(program, 'u_texture');
 
-    // ---- Static quad geometry (unit square) ----
+    // ---- Quad geometry with flipped texture Y (prevents upside-down image without UNPACK_FLIP_Y_WEBGL) ----
     const quadVertices = new Float32Array([
-      0, 0, 0, 1,
-      1, 0, 1, 1,
-      0, 1, 0, 0,
-      1, 0, 1, 1,
-      0, 1, 0, 0,
-      1, 1, 1, 0
+      // position (x,y), texCoord (u, v_flipped)
+      0, 0, 0, 0,   // bottom-left  -> tex (0,0)
+      1, 0, 1, 0,   // bottom-right -> tex (1,0)
+      0, 1, 0, 1,   // top-left     -> tex (0,1)
+      1, 0, 1, 0,   // bottom-right -> tex (1,0)
+      0, 1, 0, 1,   // top-left     -> tex (0,1)
+      1, 1, 1, 1    // top-right    -> tex (1,1)
     ]);
     const quadBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -192,10 +193,14 @@
     let dragging = false, dragStartX = 0, dragStartY = 0, dragOffsetX = 0, dragOffsetY = 0;
     let initialPinchDistance = 0, initialScale = 1.0, initialPinchCenter = { x: 0, y: 0 };
 
-    // ---- Tiled textures ----
-    const MAX_TEX = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 2048);
-    console.log('Max texture size:', MAX_TEX, '(will split into tiles)');
-    let tileTextures = [];
+    // ---- Texture management ----
+    const MAX_TEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    console.log('Max texture size:', MAX_TEX);
+    const IMG_WIDTH = 7000, IMG_HEIGHT = 6000;
+    const SINGLE_TEXTURE = MAX_TEX >= IMG_WIDTH && MAX_TEX >= IMG_HEIGHT; // use one texture if supported
+
+    let tileTextures = [];   // { tex, x, y, w, h } if tiling; if single, we use one entry
+    let singleTextureInfo = null; // { tex, w, h }
 
     // Matrix multiplication (column‑major)
     function mat3mul(a, b, out) {
@@ -211,23 +216,45 @@
       }
     }
 
-    function createTiledTextures(image) {
+    function createTextures(image) {
+      // Clean up old textures
       tileTextures.forEach(t => gl.deleteTexture(t.tex));
       tileTextures = [];
+      if (singleTextureInfo) {
+        gl.deleteTexture(singleTextureInfo.tex);
+        singleTextureInfo = null;
+      }
 
-      const imgW = image.width, imgH = image.height;
-      console.log('Creating tiles from', imgW, 'x', imgH);
+      if (SINGLE_TEXTURE) {
+        // Single texture approach
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        if (gl.getError() !== gl.NO_ERROR) {
+          console.error('Failed to upload single texture, falling back to tiling.');
+          gl.deleteTexture(tex);
+          SINGLE_TEXTURE = false; // fallback
+        } else {
+          singleTextureInfo = { tex, w: IMG_WIDTH, h: IMG_HEIGHT };
+          console.log('Using single texture');
+          return;
+        }
+      }
 
-      // ---- Flip the Y axis during upload so the image appears right‑side up ----
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-
+      // Tiling fallback
+      const tileSize = Math.min(MAX_TEX, 2048); // safe internal limit
+      console.log('Tiling with size', tileSize);
       const offCanvas = document.createElement('canvas');
       const offCtx = offCanvas.getContext('2d');
 
-      for (let y = 0; y < imgH; y += MAX_TEX) {
-        for (let x = 0; x < imgW; x += MAX_TEX) {
-          const w = Math.min(MAX_TEX, imgW - x);
-          const h = Math.min(MAX_TEX, imgH - y);
+      for (let y = 0; y < IMG_HEIGHT; y += tileSize) {
+        for (let x = 0; x < IMG_WIDTH; x += tileSize) {
+          const w = Math.min(tileSize, IMG_WIDTH - x);
+          const h = Math.min(tileSize, IMG_HEIGHT - y);
           offCanvas.width = w;
           offCanvas.height = h;
           offCtx.clearRect(0, 0, w, h);
@@ -240,7 +267,6 @@
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, offCanvas);
-
           if (gl.getError() !== gl.NO_ERROR) {
             console.error('WebGL error uploading tile at', x, y);
             gl.deleteTexture(tex);
@@ -254,48 +280,75 @@
 
     // ---- Drawing ----
     function drawScene() {
-      gl.clearColor(0.627, 0.741, 1.0, 1.0); // water blue
+      gl.clearColor(0.627, 0.741, 1.0, 1.0); // water blue #A0BDFF
       gl.clear(gl.COLOR_BUFFER_BIT);
 
-      if (tileTextures.length === 0 || !currentImage.complete) return;
-
       const cssW = window.innerWidth, cssH = window.innerHeight;
-
-      const proj = new Float32Array([
-        2/cssW, 0, 0,
-        0, -2/cssH, 0,
-        -1, 1, 1
-      ]);
-      const pan = new Float32Array([
-        1, 0, 0,
-        0, 1, 0,
-        offsetX, offsetY, 1
-      ]);
-      const zoom = new Float32Array([
-        scale, 0, 0,
-        0, scale, 0,
-        0, 0, 1
-      ]);
-
-      const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9), combined = new Float32Array(9);
-      mat3mul(pan, zoom, tmp1);
-      mat3mul(proj, tmp1, tmp2);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-
-      for (const tile of tileTextures) {
-        gl.bindTexture(gl.TEXTURE_2D, tile.tex);
-
-        const tileScale = new Float32Array([
-          tile.w, 0, 0,
-          0, tile.h, 0,
-          tile.x, tile.y, 1
+      if (SINGLE_TEXTURE && singleTextureInfo) {
+        // Draw single texture
+        gl.bindTexture(gl.TEXTURE_2D, singleTextureInfo.tex);
+        const proj = new Float32Array([
+          2/cssW, 0, 0,
+          0, -2/cssH, 0,
+          -1, 1, 1
         ]);
-        mat3mul(tmp2, tileScale, combined);
-
+        const pan = new Float32Array([
+          1, 0, 0,
+          0, 1, 0,
+          offsetX, offsetY, 1
+        ]);
+        const zoom = new Float32Array([
+          scale, 0, 0,
+          0, scale, 0,
+          0, 0, 1
+        ]);
+        const imgScale = new Float32Array([
+          IMG_WIDTH, 0, 0,
+          0, IMG_HEIGHT, 0,
+          0, 0, 1
+        ]);
+        const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9), combined = new Float32Array(9);
+        mat3mul(pan, zoom, tmp1);
+        mat3mul(proj, tmp1, tmp2);
+        mat3mul(tmp2, imgScale, combined);
         gl.uniformMatrix3fv(uMatrixLoc, false, combined);
         gl.uniform1i(uTextureLoc, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } else if (tileTextures.length > 0) {
+        // Draw tiled
+        const proj = new Float32Array([
+          2/cssW, 0, 0,
+          0, -2/cssH, 0,
+          -1, 1, 1
+        ]);
+        const pan = new Float32Array([
+          1, 0, 0,
+          0, 1, 0,
+          offsetX, offsetY, 1
+        ]);
+        const zoom = new Float32Array([
+          scale, 0, 0,
+          0, scale, 0,
+          0, 0, 1
+        ]);
+        const tmp1 = new Float32Array(9), tmp2 = new Float32Array(9), combined = new Float32Array(9);
+        mat3mul(pan, zoom, tmp1);
+        mat3mul(proj, tmp1, tmp2);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        for (const tile of tileTextures) {
+          gl.bindTexture(gl.TEXTURE_2D, tile.tex);
+          const tileScale = new Float32Array([
+            tile.w, 0, 0,
+            0, tile.h, 0,
+            tile.x, tile.y, 1
+          ]);
+          mat3mul(tmp2, tileScale, combined);
+          gl.uniformMatrix3fv(uMatrixLoc, false, combined);
+          gl.uniform1i(uTextureLoc, 0);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
       }
     }
 
@@ -347,9 +400,8 @@
     }
 
     currentImage.onload = () => {
-      console.log('Image loaded:', currentImage.naturalWidth, 'x', currentImage.naturalHeight);
       if (currentIndex !== requestedIndex) {
-        createTiledTextures(currentImage);
+        createTextures(currentImage);
         if (currentIndex === -1) {
           currentIndex = requestedIndex;
           resetView();
@@ -361,7 +413,7 @@
     };
     currentImage.onerror = () => console.error('Image failed:', currentImage.src);
 
-    // ---- Pan & Zoom events ----
+    // ---- Pan & Zoom events (unchanged) ----
     canvas.addEventListener('mousedown', e => { e.preventDefault(); dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragOffsetX = offsetX; dragOffsetY = offsetY; canvas.style.cursor = 'grabbing'; });
     window.addEventListener('mousemove', e => { if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawScene(); });
     window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
@@ -377,17 +429,22 @@
       else if(e.key==='r'||e.key==='R') resetView();
     });
 
-    // ---- Overlay download (transparent) ----
+    // ---- Overlay download (transparent, reusing a single offscreen canvas) ----
+    let exportCanvas = null; // reusable canvas
+
     function downloadOverlay(cropKey) {
-      if (!currentImage.complete || currentImage.naturalWidth===0) return;
+      if (!currentImage.complete || currentImage.naturalWidth === 0) return;
       const crop = CROPS[cropKey];
       if (!crop) return;
-      const tmp = document.createElement('canvas');
-      tmp.width = crop.w; tmp.height = crop.h;
-      const tctx = tmp.getContext('2d');
+
+      if (!exportCanvas) exportCanvas = document.createElement('canvas');
+      exportCanvas.width = crop.w;
+      exportCanvas.height = crop.h;
+      const tctx = exportCanvas.getContext('2d');
       tctx.clearRect(0, 0, crop.w, crop.h);
       tctx.drawImage(currentImage, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
-      const dataUrl = tmp.toDataURL('image/png');
+
+      const dataUrl = exportCanvas.toDataURL('image/png');
       const bounds = cropToBounds(crop.x, crop.y, crop.w, crop.h);
       const m = snapshots[currentIndex].match(/(\d{8}_\d{6})/);
       const ts = m ? m[0] : 'unknown';
@@ -405,19 +462,26 @@
         hasPlaced: true,
         visible: true
       };
-      const blob = new Blob([JSON.stringify(overlay)], {type:'application/json'});
+      const blob = new Blob([JSON.stringify(overlay)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `wdp_${cropKey}_${ts}.wplace`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      a.href = url;
+      a.download = `wdp_${cropKey}_${ts}.wplace`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
 
     dlPlanets.addEventListener('click', () => downloadOverlay('planets'));
     dlMain.addEventListener('click', () => downloadOverlay('main'));
-    dlFarEast.addEventListener('click', () => downloadOverlay('far_east'));
+    dlFarEast.addEventListener('click', () => downloadOverlay('far east'));
 
+    // Initial resize (water background shown)
     resize();
+    // On startup, set default background
+    gl.clearColor(0.627, 0.741, 1.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
   })();
 </script>
 </body>
