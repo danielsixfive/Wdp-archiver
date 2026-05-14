@@ -41,7 +41,7 @@ else
       continue
     fi
 
-    if [ $(( NOW_EPOCH - file_epoch )) -le 172800 ]; then
+    if [ $(( NOW_EPOCH - file_epoch )) -le 86400 ]; then
       SNAPSHOTS+=("$s")
     fi
   done
