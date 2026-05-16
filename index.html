@@ -15,6 +15,13 @@
       touch-action: none; cursor: grab;
     }
     #canvas:active { cursor: grabbing; }
+    #sel-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;        /* clicks pass through unless selection mode is on */
+  display: block;
+}
     #interval-select, #snapshot-select {
       background: #333; color: white; border: 1px solid #888;
       border-radius: 4px; padding: 2px 4px; font-size: 0.8rem;
@@ -60,6 +67,7 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
+  <canvas id="sel-canvas" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
 
   <div id="top-bar">
     <div id="interval-group">
@@ -80,6 +88,10 @@
     <span id="timestamp-label-top">--</span>
     <div id="download-group">
       <button class="dl-btn" id="dl-snapshot">snapshot png</button>
+      <button class="dl-btn" id="dl-select-toggle">select area</button>
+      <button class="dl-btn" id="dl-select-cancel" style="display:none;">cancel</button>
+      <button class="dl-btn" id="dl-select-png" style="display:none;">download png</button>
+      <button class="dl-btn" id="dl-select-overlay" style="display:none;">download overlay</button>
     </div>
   </div>
 
@@ -379,7 +391,6 @@
       gl.viewport(0, 0, canvas.width, canvas.height);
       drawScene();
     }
-    window.addEventListener('resize', resize);
 
     function resetView() {
       if (!currentImage.complete || currentImage.naturalWidth === 0) return;
@@ -606,9 +617,9 @@ snapshotSelect.addEventListener('change', () => {
     });
 
     // ---- Pan & Zoom events (unchanged) ----
-    canvas.addEventListener('mousedown', e => { e.preventDefault(); dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragOffsetX = offsetX; dragOffsetY = offsetY; canvas.style.cursor = 'grabbing'; });
-    window.addEventListener('mousemove', e => { if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawScene(); });
-    window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
+    canvas.addEventListener('mousedown', e => { if (selectionMode) return; e.preventDefault(); dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragOffsetX = offsetX; dragOffsetY = offsetY; canvas.style.cursor = 'grabbing'; });
+    window.addEventListener('mousemove', e => { if (selectionMode) return; if (!dragging) return; offsetX = dragOffsetX + (e.clientX - dragStartX); offsetY = dragOffsetY + (e.clientY - dragStartY); drawScene(); });
+    window.addEventListener('mouseup', () => { if (selectionMode) return; dragging = false; canvas.style.cursor = 'grab'; });
 
 // ---- 1. touchstart ----
 canvas.addEventListener('touchstart', e => {
@@ -693,6 +704,394 @@ canvas.addEventListener('touchend', e => {
 
     // ---- Overlay download (transparent, reusing a single offscreen canvas) ----
     let exportCanvas = null; // reusable canvas
+    // ---- Selection mode ----
+const selCanvas = document.getElementById('sel-canvas');
+const selCtx = selCanvas.getContext('2d');
+
+let selectionMode = false;
+let selecting = false;          // currently drawing initial rectangle?
+let selStartImg = null;        // { x, y } in image pixels
+let selEndImg = null;
+let dragHandle = null;         // which handle is being dragged? (null, 'tl', 'tr', 'bl', 'br', 'top', 'bottom', 'left', 'right', 'move')
+
+// Handle size (in CSS pixels)
+const HANDLE_SIZE = 8;
+
+// Convert client coords to image pixel coords (already exists, but we'll use it)
+// clientToImg(clientX, clientY) and imgToClient(imgX, imgY) are defined later
+// We'll place those functions right after this block.
+
+// Resize selection canvas to match main canvas
+function resizeSelCanvas() {
+  selCanvas.width = canvas.width;
+  selCanvas.height = canvas.height;
+  selCanvas.style.width = canvas.style.width;
+  selCanvas.style.height = canvas.style.height;
+}
+
+// Get the rectangle corners (top-left and bottom-right) in image coords
+function getSelectionRect() {
+  if (!selStartImg || !selEndImg) return null;
+  return {
+    x1: Math.min(selStartImg.x, selEndImg.x),
+    y1: Math.min(selStartImg.y, selEndImg.y),
+    x2: Math.max(selStartImg.x, selEndImg.x),
+    y2: Math.max(selStartImg.y, selEndImg.y)
+  };
+}
+
+// Draw the selection rectangle and drag handles
+function drawSelection() {
+  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+  const rect = getSelectionRect();
+  if (!rect) return;
+
+  const start = imgToClient(rect.x1, rect.y1);
+  const end = imgToClient(rect.x2, rect.y2);
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  const w = Math.abs(end.x - start.x);
+  const h = Math.abs(end.y - start.y);
+
+  // Rectangle fill
+  selCtx.fillStyle = 'rgba(255, 255, 0, 0.1)';
+  selCtx.fillRect(x, y, w, h);
+
+  // Rectangle border
+  selCtx.strokeStyle = '#FF0';
+  selCtx.lineWidth = 1;
+  selCtx.strokeRect(x, y, w, h);
+
+  // Draw handles (small squares)
+  const handles = [
+    { x: x, y: y },                         // top-left
+    { x: x + w, y: y },                     // top-right
+    { x: x, y: y + h },                     // bottom-left
+    { x: x + w, y: y + h },                 // bottom-right
+    { x: x + w/2, y: y },                   // top edge
+    { x: x + w/2, y: y + h },               // bottom edge
+    { x: x, y: y + h/2 },                   // left edge
+    { x: x + w, y: y + h/2 }                // right edge
+  ];
+  selCtx.fillStyle = '#FFF';
+  selCtx.strokeStyle = '#000';
+  handles.forEach(h => {
+    selCtx.fillRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+    selCtx.strokeRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+  });
+}
+
+// Determine which handle is at clientX, clientY (in image pixels)
+function hitTestHandle(clientX, clientY) {
+  const rect = getSelectionRect();
+  if (!rect) return null;
+  // Convert client to image coords (we'll test in client space for easier hit areas)
+  const img = clientToImg(clientX, clientY);
+  const x1 = Math.min(selStartImg.x, selEndImg.x);
+  const x2 = Math.max(selStartImg.x, selEndImg.x);
+  const y1 = Math.min(selStartImg.y, selEndImg.y);
+  const y2 = Math.max(selStartImg.y, selEndImg.y);
+  const threshold = HANDLE_SIZE / scale; // convert handle size to image pixels
+
+  // Check corners
+  if (Math.abs(img.x - x1) <= threshold && Math.abs(img.y - y1) <= threshold) return 'tl';
+  if (Math.abs(img.x - x2) <= threshold && Math.abs(img.y - y1) <= threshold) return 'tr';
+  if (Math.abs(img.x - x1) <= threshold && Math.abs(img.y - y2) <= threshold) return 'bl';
+  if (Math.abs(img.x - x2) <= threshold && Math.abs(img.y - y2) <= threshold) return 'br';
+  // Check edges
+  if (Math.abs(img.x - x1) <= threshold && img.y > y1 && img.y < y2) return 'left';
+  if (Math.abs(img.x - x2) <= threshold && img.y > y1 && img.y < y2) return 'right';
+  if (Math.abs(img.y - y1) <= threshold && img.x > x1 && img.x < x2) return 'top';
+  if (Math.abs(img.y - y2) <= threshold && img.x > x1 && img.x < x2) return 'bottom';
+  // Check inside rectangle (move)
+  if (img.x > x1 && img.x < x2 && img.y > y1 && img.y < y2) return 'move';
+  return null;
+}
+
+// Convert client coords to image pixel coords
+function clientToImg(clientX, clientY) {
+  const imgX = (clientX - offsetX) / scale;
+  const imgY = (clientY - offsetY) / scale;
+  return { x: imgX, y: imgY };
+}
+
+// Convert image pixel coords to client coords
+function imgToClient(imgX, imgY) {
+  const clientX = imgX * scale + offsetX;
+  const clientY = imgY * scale + offsetY;
+  return { x: clientX, y: clientY };
+}
+
+// Constrain a point to image bounds
+function constrainToImage(imgPt) {
+  return {
+    x: Math.max(0, Math.min(imgPt.x, IMG_WIDTH)),
+    y: Math.max(0, Math.min(imgPt.y, IMG_HEIGHT))
+  };
+}
+
+// Update selection rectangle when dragging a handle
+function dragSelection(clientX, clientY) {
+  const img = constrainToImage(clientToImg(clientX, clientY));
+  const rect = getSelectionRect();
+  if (!rect) return;
+
+  // Remember original rectangle before dragging started (we'll save in dragHandleStart)
+  // We'll store the initial rectangle state when dragHandle is set.
+  // For simplicity, we assume selStartImg and selEndImg represent the two corners of the rectangle
+  // and we update them based on the handle being dragged.
+  // We'll need to save the initial corners before the drag starts. We'll do that in the mousedown/touchstart handlers.
+
+  const start = selStartImg, end = selEndImg;
+  const x1 = Math.min(start.x, end.x);
+  const y1 = Math.min(start.y, end.y);
+  const x2 = Math.max(start.x, end.x);
+  const y2 = Math.max(start.y, end.y);
+
+  switch (dragHandle) {
+    case 'tl': selStartImg = { x: img.x, y: img.y }; selEndImg = { x: x2, y: y2 }; break;
+    case 'tr': selStartImg = { x: x1, y: img.y }; selEndImg = { x: img.x, y: y2 }; break;
+    case 'bl': selStartImg = { x: img.x, y: y1 }; selEndImg = { x: x2, y: img.y }; break;
+    case 'br': selStartImg = { x: x1, y: y1 }; selEndImg = { x: img.x, y: img.y }; break;
+    case 'top': selStartImg = { x: x1, y: img.y }; selEndImg = { x: x2, y: y2 }; break;
+    case 'bottom': selStartImg = { x: x1, y: y1 }; selEndImg = { x: x2, y: img.y }; break;
+    case 'left': selStartImg = { x: img.x, y: y1 }; selEndImg = { x: x2, y: y2 }; break;
+    case 'right': selStartImg = { x: x1, y: y1 }; selEndImg = { x: img.x, y: y2 }; break;
+    case 'move': {
+      const dx = img.x - (x1 + x2) / 2;
+      const dy = img.y - (y1 + y2) / 2;
+      const w = x2 - x1, h = y2 - y1;
+      let newX1 = x1 + dx, newY1 = y1 + dy;
+      // constrain movement to keep within image bounds
+      newX1 = Math.max(0, Math.min(newX1, IMG_WIDTH - w));
+      newY1 = Math.max(0, Math.min(newY1, IMG_HEIGHT - h));
+      selStartImg = { x: newX1, y: newY1 };
+      selEndImg = { x: newX1 + w, y: newY1 + h };
+      break;
+    }
+  }
+  drawSelection();
+}
+
+// Toggle selection mode
+const dlSelectToggle = document.getElementById('dl-select-toggle');
+const dlSelectCancel = document.getElementById('dl-select-cancel');
+const dlSelectPng = document.getElementById('dl-select-png');
+const dlSelectOverlay = document.getElementById('dl-select-overlay');
+
+function setSelectionButtonsVisible(visible) {
+  const disp = visible ? 'inline-block' : 'none';
+  dlSelectCancel.style.display = disp;
+  dlSelectPng.style.display = disp;
+  dlSelectOverlay.style.display = disp;
+}
+
+dlSelectToggle.addEventListener('click', () => {
+  selectionMode = !selectionMode;
+  dlSelectToggle.textContent = selectionMode ? 'selecting...' : 'select area';
+  selCanvas.style.pointerEvents = selectionMode ? 'auto' : 'none';
+  if (!selectionMode) {
+    // clear selection
+    selStartImg = selEndImg = null;
+    dragHandle = null;
+    selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+    setSelectionButtonsVisible(false);
+  }
+});
+
+dlSelectCancel.addEventListener('click', () => {
+  if (!selectionMode) return;
+  selStartImg = selEndImg = null;
+  dragHandle = null;
+  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+  setSelectionButtonsVisible(false);
+});
+
+// ---- Override mouse events for selection mode ----
+// We'll attach listeners to selCanvas. When selectionMode is true and pointer-events is auto, these work.
+
+selCanvas.addEventListener('mousedown', e => {
+  if (!selectionMode) return;
+  e.preventDefault();
+  const clientX = e.clientX, clientY = e.clientY;
+  const img = constrainToImage(clientToImg(clientX, clientY));
+
+  // If there's already a rectangle, check if we hit a handle
+  if (selStartImg && selEndImg && getSelectionRect()) {
+    const handle = hitTestHandle(clientX, clientY);
+    if (handle) {
+      dragHandle = handle;
+      // Store the rectangle corners at the start of drag (for move handle)
+      // For move, we need the midpoint. We'll compute inside dragSelection.
+      selecting = false;
+      return;
+    }
+  }
+
+  // Otherwise, start a new rectangle
+  selecting = true;
+  selStartImg = img;
+  selEndImg = null;
+  dragHandle = null;
+  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+});
+
+selCanvas.addEventListener('mousemove', e => {
+  if (!selectionMode) return;
+  if (selecting) {
+    // Drawing new rectangle
+    const img = constrainToImage(clientToImg(e.clientX, e.clientY));
+    selEndImg = img;
+    drawSelection();
+  } else if (dragHandle) {
+    // Dragging handle
+    dragSelection(e.clientX, e.clientY);
+  }
+});
+
+selCanvas.addEventListener('mouseup', e => {
+  if (!selectionMode) return;
+  if (selecting) {
+    selecting = false;
+    if (selStartImg && selEndImg) {
+      // Ensure rectangle has non-zero area (min 1px)
+      if (Math.abs(selEndImg.x - selStartImg.x) < 1 || Math.abs(selEndImg.y - selStartImg.y) < 1) {
+        selStartImg = selEndImg = null;
+        setSelectionButtonsVisible(false);
+      } else {
+        setSelectionButtonsVisible(true);
+      }
+    }
+    drawSelection();
+  } else if (dragHandle) {
+    dragHandle = null;
+    drawSelection();
+  }
+});
+
+// Touch events for selection (similar to mouse)
+selCanvas.addEventListener('touchstart', e => {
+  if (!selectionMode) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  const clientX = t.clientX, clientY = t.clientY;
+  const img = constrainToImage(clientToImg(clientX, clientY));
+
+  if (selStartImg && selEndImg && getSelectionRect()) {
+    const handle = hitTestHandle(clientX, clientY);
+    if (handle) {
+      dragHandle = handle;
+      selecting = false;
+      return;
+    }
+  }
+
+  selecting = true;
+  selStartImg = img;
+  selEndImg = null;
+  dragHandle = null;
+  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+}, { passive: false });
+
+selCanvas.addEventListener('touchmove', e => {
+  if (!selectionMode) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  if (selecting) {
+    selEndImg = constrainToImage(clientToImg(t.clientX, t.clientY));
+    drawSelection();
+  } else if (dragHandle) {
+    dragSelection(t.clientX, t.clientY);
+  }
+}, { passive: false });
+
+selCanvas.addEventListener('touchend', e => {
+  if (!selectionMode) return;
+  if (selecting) {
+    selecting = false;
+    if (selStartImg && selEndImg) {
+      if (Math.abs(selEndImg.x - selStartImg.x) < 1 || Math.abs(selEndImg.y - selStartImg.y) < 1) {
+        selStartImg = selEndImg = null;
+        setSelectionButtonsVisible(false);
+      } else {
+        setSelectionButtonsVisible(true);
+      }
+    }
+    drawSelection();
+  } else if (dragHandle) {
+    dragHandle = null;
+    drawSelection();
+  }
+});
+
+// ---- Download custom selection ----
+function getCroppedImageData() {
+  if (!selStartImg || !selEndImg) return null;
+  const rect = getSelectionRect();
+  if (!rect || rect.x2 - rect.x1 < 1 || rect.y2 - rect.y1 < 1) return null;
+  const tmp = document.createElement('canvas');
+  tmp.width = rect.x2 - rect.x1;
+  tmp.height = rect.y2 - rect.y1;
+  const tctx = tmp.getContext('2d');
+  tctx.clearRect(0, 0, tmp.width, tmp.height);
+  tctx.drawImage(currentImage, rect.x1, rect.y1, tmp.width, tmp.height, 0, 0, tmp.width, tmp.height);
+  return {
+    dataUrl: tmp.toDataURL('image/png'),
+    width: tmp.width,
+    height: tmp.height,
+    x: rect.x1,
+    y: rect.y1
+  };
+}
+
+dlSelectPng.addEventListener('click', () => {
+  const cropData = getCroppedImageData();
+  if (!cropData) return;
+  const a = document.createElement('a');
+  a.href = cropData.dataUrl;
+  a.download = 'selection.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+});
+
+dlSelectOverlay.addEventListener('click', () => {
+  const cropData = getCroppedImageData();
+  if (!cropData) return;
+  const bounds = cropToBounds(cropData.x, cropData.y, cropData.width, cropData.height);
+  const m = (filteredSnapshots[currentFilteredIndex] || '').match(/(\d{8}_\d{6})/);
+  const ts = m ? m[0] : Date.now();
+
+  const overlay = {
+    id: `wdp_custom_${ts}`,
+    schemaVersion: "1",
+    name: `custom_${ts}.png`,
+    opacity: 1,
+    image: { dataUrl: cropData.dataUrl, width: cropData.width, height: cropData.height },
+    bounds,
+    colorMetric: "lab",
+    dithering: false,
+    order: 0,
+    locked: false,
+    hasPlaced: true,
+    visible: true
+  };
+
+  const blob = new Blob([JSON.stringify(overlay)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `wdp_custom_${ts}.wplace`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// Ensure the selection canvas resizes with the window
+const origResize = resize;
+resize = function() {
+  origResize();
+  resizeSelCanvas();
+};
 
     function downloadOverlay(cropKey) {
       if (!currentImage.complete || currentImage.naturalWidth === 0) return;
