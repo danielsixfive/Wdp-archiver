@@ -1,1 +1,2 @@
+name	x	y	w	h	outfile	[time_min]	[interval_min]	[delay]
 na	2588	2163	415	308	na.gif
