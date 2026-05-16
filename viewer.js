@@ -748,38 +748,29 @@
 
   // Toggle selection mode
   const dlSelectToggle = document.getElementById('dl-select-toggle');
-  const dlSelectCancel = document.getElementById('dl-select-cancel');
   const dlSelectPng = document.getElementById('dl-select-png');
   const dlSelectOverlay = document.getElementById('dl-select-overlay');
 
-  function setSelectionButtonsVisible(visible) {
-    const disp = visible ? 'inline-block' : 'none';
-    dlSelectCancel.style.display = disp;
-    dlSelectPng.style.display = disp;
-    dlSelectOverlay.style.display = disp;
+function setSelectionButtonsVisible(visible) {
+  const disp = visible ? 'inline-block' : 'none';
+  dlSelectPng.style.display = disp;
+  dlSelectOverlay.style.display = disp;
+}
+
+dlSelectToggle.addEventListener('click', () => {
+  selectionMode = !selectionMode;
+  if (selectionMode) {
+    dlSelectToggle.textContent = 'cancel';
+    selCanvas.style.pointerEvents = 'auto';
+  } else {
+    dlSelectToggle.textContent = 'select area';
+    selCanvas.style.pointerEvents = 'none';
+    // Clear selection
+    selStartImg = selEndImg = null;
+    dragHandle = null;
+    selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+    setSelectionButtonsVisible(false);
   }
-
-  dlSelectToggle.addEventListener('click', () => {
-    selectionMode = !selectionMode;
-    dlSelectToggle.textContent = selectionMode ? 'selecting...' : 'select area';
-    selCanvas.style.pointerEvents = selectionMode ? 'auto' : 'none';
-    if (!selectionMode) {
-      selStartImg = selEndImg = null;
-      dragHandle = null;
-      selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
-      setSelectionButtonsVisible(false);
-    }
-  });
-
-dlSelectCancel.addEventListener('click', () => {
-  if (!selectionMode) return;
-  selectionMode = false;
-  dlSelectToggle.textContent = 'select area';
-  selCanvas.style.pointerEvents = 'none';
-  selStartImg = selEndImg = null;
-  dragHandle = null;
-  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
-  setSelectionButtonsVisible(false);
 });
 
   // ---- Override mouse events for selection mode ----
