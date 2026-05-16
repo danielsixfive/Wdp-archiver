@@ -629,41 +629,47 @@
   }
 
   function drawSelection() {
-    selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
-    const rect = getSelectionRect();
-    if (!rect) return;
+  selCtx.clearRect(0, 0, selCanvas.width, selCanvas.height);
+  const rect = getSelectionRect();
+  if (!rect) return;
 
-    const start = imgToClient(rect.x1, rect.y1);
-    const end = imgToClient(rect.x2, rect.y2);
-    const x = Math.min(start.x, end.x);
-    const y = Math.min(start.y, end.y);
-    const w = Math.abs(end.x - start.x);
-    const h = Math.abs(end.y - start.y);
+  const start = imgToClient(rect.x1, rect.y1);
+  const end = imgToClient(rect.x2, rect.y2);
 
-    selCtx.fillStyle = 'rgba(255, 255, 0, 0.1)';
-    selCtx.fillRect(x, y, w, h);
-    selCtx.strokeStyle = '#FF0';
-    selCtx.lineWidth = 1;
-    selCtx.strokeRect(x, y, w, h);
+  // Snap to whole CSS pixels so the rectangle is crisp
+  let x = Math.round(Math.min(start.x, end.x));
+  let y = Math.round(Math.min(start.y, end.y));
+  let w = Math.round(Math.abs(end.x - start.x));
+  let h = Math.round(Math.abs(end.y - start.y));
 
-    const handles = [
-      { x: x, y: y },
-      { x: x + w, y: y },
-      { x: x, y: y + h },
-      { x: x + w, y: y + h },
-      { x: x + w/2, y: y },
-      { x: x + w/2, y: y + h },
-      { x: x, y: y + h/2 },
-      { x: x + w, y: y + h/2 }
-    ];
-    selCtx.fillStyle = '#FFF';
-    selCtx.strokeStyle = '#000';
-    handles.forEach(h => {
-      selCtx.fillRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
-      selCtx.strokeRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
-    });
-  }
+  // Avoid zero‑size rectangle
+  if (w < 1) w = 1;
+  if (h < 1) h = 1;
 
+  selCtx.fillStyle = 'rgba(255, 255, 0, 0.1)';
+  selCtx.fillRect(x, y, w, h);
+  selCtx.strokeStyle = '#FF0';
+  selCtx.lineWidth = 1;
+  selCtx.strokeRect(x, y, w, h);
+
+  const handles = [
+    { x: x, y: y },
+    { x: x + w, y: y },
+    { x: x, y: y + h },
+    { x: x + w, y: y + h },
+    { x: x + w/2, y: y },
+    { x: x + w/2, y: y + h },
+    { x: x, y: y + h/2 },
+    { x: x + w, y: y + h/2 }
+  ];
+  selCtx.fillStyle = '#FFF';
+  selCtx.strokeStyle = '#000';
+  handles.forEach(h => {
+    selCtx.fillRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+    selCtx.strokeRect(h.x - HANDLE_SIZE/2, h.y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+  });
+}
+  
   function hitTestHandle(clientX, clientY) {
     const rect = getSelectionRect();
     if (!rect) return null;
