@@ -751,7 +751,7 @@ function setSelectionButtonsVisible(visible) {
 dlSelectToggle.addEventListener('click', () => {
   selectionMode = !selectionMode;
   if (selectionMode) {
-    dlSelectToggle.textContent = 'cancel';
+    dlSelectToggle.textContent = 'done';
     selCanvas.style.pointerEvents = 'auto';
   } else {
     dlSelectToggle.textContent = 'select area';
