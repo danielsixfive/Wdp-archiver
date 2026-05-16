@@ -505,7 +505,7 @@
       timestampLabelTop.textContent = m
         ? `${m[1].slice(0,4)}-${m[1].slice(4,6)}-${m[1].slice(6,8)} ${m[2].slice(0,2)}:${m[2].slice(2,4)}:${m[2].slice(4,6)}`
         : filename;
-      currentImage.src = filename;
+      currentImage.src = 'https://raw.githubusercontent.com/daniel-jbx/Wdp-archiver/assets/' + filename;
     }
 
     // ---- Image load handler (uses filtered indices) ----
@@ -526,7 +526,7 @@
 let CROPS = {};                     // will be populated
 const downloadGroup = document.getElementById('download-group');
 
-fetch('overlays.txt')
+fetch('https://raw.githubusercontent.com/daniel-jbx/Wdp-archiver/assets/overlays.txt')
   .then(r => r.text())
   .then(txt => {
     const lines = txt.split('\n');
@@ -556,7 +556,7 @@ fetch('overlays.txt')
   .catch(e => console.error('Failed to load overlays.txt', e));
     
     // ---- Initial snapshot loading ----
-    fetch('snapshots.json')
+    fetch('https://raw.githubusercontent.com/daniel-jbx/Wdp-archiver/assets/snapshots.json')
       .then(r => r.json())
       .then(files => {
         if (!files.length) { timestampLabelTop.textContent = 'No snapshots found.'; return; }
@@ -744,8 +744,8 @@ dlSnapshot.addEventListener('click', () => {
   if (currentFilteredIndex < 0 || currentFilteredIndex >= filteredSnapshots.length) return;
   const filename = filteredSnapshots[currentFilteredIndex];
   const a = document.createElement('a');
-  a.href = filename;          // relative path to the PNG on the same server
-  a.download = filename;      // forces download, file name same as original
+  a.href = 'https://raw.githubusercontent.com/daniel-jbx/Wdp-archiver/assets/' + filename;
+  a.download = 'https://raw.githubusercontent.com/daniel-jbx/Wdp-archiver/assets/' + filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
