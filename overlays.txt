@@ -1,1 +1,1 @@
-northamerica	2700	1200	3010	1430
+northamerica	2700	2200	3010	2430
