@@ -49,19 +49,15 @@ while read -r name x y w h outfile time_min interval_min delay; do
   echo "--- Processing crop: $name -> $outfile ---"
   echo "  time window: ${time_min} min, interval: ${interval_min} min, delay: ${normal_delay}, end delay: ${END_DELAY}"
 
-  # Determine which snapshots to use for this crop
+  # Determine which snapshots to use for this crop (always respect the crop's time window)
   CROP_SNAPS=()
-  if [ "${FULL_REGEN:-false}" = "true" ]; then
-    echo "  Full regeneration mode – using all snapshots"
-    CROP_SNAPS=("${ALL_SNAPS[@]}")
-  else
-    for s in "${ALL_SNAPS[@]}"; do
-      epoch=$(get_epoch "$s")
-      if [ "$epoch" -ne 0 ] && [ $(( NOW_EPOCH - epoch )) -le "$TIME_WINDOW_SEC" ]; then
-        CROP_SNAPS+=("$s")
-      fi
-    done
-  fi
+  echo "  Filtering snapshots from the last ${time_min} minutes..."
+  for s in "${ALL_SNAPS[@]}"; do
+    epoch=$(get_epoch "$s")
+    if [ "$epoch" -ne 0 ] && [ $(( NOW_EPOCH - epoch )) -le "$TIME_WINDOW_SEC" ]; then
+      CROP_SNAPS+=("$s")
+    fi
+  done
 
   if [ ${#CROP_SNAPS[@]} -eq 0 ]; then
     echo "  No snapshots in time window – skipping."
@@ -71,7 +67,6 @@ while read -r name x y w h outfile time_min interval_min delay; do
   # Apply interval subsampling (target‑based selection)
   if [ "$INTERVAL_SEC" -gt 0 ]; then
     # Create arrays with epoch and filename, sorted by epoch ascending
-    # We'll use awk to sort because bash sorting can be tricky
     tmpfile=$(mktemp)
     for s in "${CROP_SNAPS[@]}"; do
       echo "$(get_epoch "$s") $s"
@@ -117,18 +112,16 @@ while read -r name x y w h outfile time_min interval_min delay; do
       target=$(( target + INTERVAL_SEC ))
     done
 
-    # Remove duplicates (if same snapshot chosen for two targets)
-    # We'll use awk to print unique lines, preserving order
+    # Remove duplicates
     CHOSEN_UNIQ=()
     while IFS= read -r line; do
       CHOSEN_UNIQ+=("$line")
     done < <(printf "%s\n" "${CHOSEN[@]}" | awk '!seen[$0]++')
 
     CROP_SNAPS=("${CHOSEN_UNIQ[@]}")
-    echo "  Subsampled to ${#CROP_SNAPS[@]} snapshots (target interval ${interval_min} min, from $(date -d @$ref_epoch -u))"
+    echo "  Subsampled to ${#CROP_SNAPS[@]} snapshots (target interval ${interval_min} min)"
   else
-    # No interval: sort chronologically (they may already be sorted, but ensure)
-    # We'll sort by epoch
+    # No interval: sort chronologically
     tmpfile=$(mktemp)
     for s in "${CROP_SNAPS[@]}"; do
       echo "$(get_epoch "$s") $s"
