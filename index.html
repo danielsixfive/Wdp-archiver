@@ -93,9 +93,6 @@
     const canvas = document.getElementById('canvas');
     const slider = document.getElementById('slider');
     const timestampLabelTop = document.getElementById('timestamp-label-top');
-    const dlPlanets = document.getElementById('dl-planets');
-    const dlMain = document.getElementById('dl-main');
-    const dlFarEast = document.getElementById('dl-far_east');
     const intervalSelect = document.getElementById('interval-select');
     const snapshotSelect = document.getElementById('snapshot-select');
 
@@ -201,6 +198,7 @@
     let filteredSnapshots = [];       // after applying interval (oldest first)
     let sliderValueToName = {};       // maps slider index → filename (for fast lookup)
     let currentImage = new Image();
+    currentImage.crossOrigin = 'anonymous';   // allow cross-origin loading for WebGL
     let currentFilteredIndex = -1;
     let requestedFilteredIndex = -1;
     let offsetX = 0, offsetY = 0, scale = 1.0;
