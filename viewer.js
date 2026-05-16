@@ -235,15 +235,6 @@
   }
 
   // ---- Resize ----
-  function resize() {
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    drawScene();
-  }
 
   function resetView() {
     if (!currentImage.complete || currentImage.naturalWidth === 0) return;
@@ -944,15 +935,29 @@ dlSelectToggle.addEventListener('click', () => {
   });
 
   // Ensure the selection canvas resizes with the window
-  const origResize = resize;
-  resize = function() {
-    origResize();
-    resizeSelCanvas();
-  };
-  window.addEventListener('resize', resize);
+// ---- Resize (final, safe version) ----
+function safeResize() {
+  try {
+    // original resize (sets physical canvas + WebGL viewport)
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    gl.viewport(0, 0, canvas.width, canvas.height);
 
-  // Initial resize
-  resize();
-  gl.clearColor(0.627, 0.741, 1.0, 1.0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
+    // selection canvas (CSS pixels only)
+    selCanvas.width = window.innerWidth;
+    selCanvas.height = window.innerHeight;
+    selCanvas.style.width = window.innerWidth + 'px';
+    selCanvas.style.height = window.innerHeight + 'px';
+
+    drawScene();
+  } catch (e) {
+    console.error('Resize error:', e);
+  }
+}
+
+window.addEventListener('resize', safeResize);
+safeResize();  // call it now
 })();
