@@ -1,5 +1,9 @@
 name: Update Map Snapshot
 
+concurrency:
+  group: update-map-snapshot
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
 
