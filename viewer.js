@@ -683,11 +683,11 @@
     return null;
   }
 
-  function clientToImg(clientX, clientY) {
-    const imgX = (clientX - offsetX) / scale;
-    const imgY = (clientY - offsetY) / scale;
-    return { x: imgX, y: imgY };
-  }
+function clientToImg(clientX, clientY) {
+  const imgX = Math.round((clientX - offsetX) / scale);
+  const imgY = Math.round((clientY - offsetY) / scale);
+  return { x: imgX, y: imgY };
+}
 
   function imgToClient(imgX, imgY) {
     const clientX = imgX * scale + offsetX;
